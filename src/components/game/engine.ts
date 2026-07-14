@@ -29,6 +29,8 @@ export interface MobState {
   dotTicksLeft: number;
   dotNextAt: number;
   flashUntil: number;
+  aggroed: boolean;           // новый флаг агрессии
+  lastAttackAt: number;       // для атаки моба
 }
 
 export interface FloatingText {
@@ -76,6 +78,12 @@ export interface EngineState {
   lastSaveAt: number;
   ftId: number;
   moveArrivalAction: null | { type: "portal"; toLocation: string; toX: number; toY: number };
+
+  // === ROGUE SYSTEM ===
+  energy: number;
+  maxEnergy: number;
+  comboPoints: number;
+  lastEnergyRegen: number;
 }
 
 const PLAYER_SPEED = 260; // px/s
@@ -83,6 +91,12 @@ const AUTO_ATTACK_INTERVAL = 1500;
 const MELEE_RANGE = 90;
 const RANGED_RANGE = 320;
 const CASTER_CLASSES = new Set(["mage", "priest", "shaman"]);
+
+// === AGGRO SYSTEM ===
+const MOB_AGGRO_RANGE = 280;
+const MOB_DEAGGRO_RANGE = 420;
+const MOB_ATTACK_INTERVAL = 1650;
+const MOB_ATTACK_RANGE = 68;
 
 export function isRangedClass(className: string) {
   return className === "archer" || CASTER_CLASSES.has(className);
@@ -113,8 +127,12 @@ export function createInitialEngineState(character: CharacterRow): EngineState {
       dotTicksLeft: 0,
       dotNextAt: 0,
       flashUntil: 0,
+      aggroed: false,
+      lastAttackAt: 0,
     };
   }
+
+  const isRogue = character.className === "rogue";
 
   return {
     location: loc.id,
@@ -150,6 +168,12 @@ export function createInitialEngineState(character: CharacterRow): EngineState {
     lastSaveAt: Date.now(),
     ftId: 1,
     moveArrivalAction: null,
+
+    // Rogue resources
+    energy: isRogue ? 100 : 0,
+    maxEnergy: isRogue ? 100 : 0,
+    comboPoints: 0,
+    lastEnergyRegen: Date.now(),
   };
 }
 
@@ -213,6 +237,19 @@ export function tick(state: EngineState, dtMs: number, className: string) {
   if (!state.dead) {
     state.hp = Math.min(stats.maxHp, state.hp + stats.maxHp * 0.015 * regenFactor);
     state.mp = Math.min(stats.maxMp, state.mp + stats.maxMp * 0.03 * regenFactor);
+
+    // === ROGUE: Energy Regeneration ===
+    if (className === "rogue" && state.energy < state.maxEnergy) {
+      const now = Date.now();
+      if (!state.lastEnergyRegen) state.lastEnergyRegen = now;
+
+      const timeSinceRegen = now - state.lastEnergyRegen;
+      if (timeSinceRegen >= 1000) {
+        const energyRegen = 10; // 10 энергии в секунду
+        state.energy = Math.min(state.maxEnergy, state.energy + energyRegen);
+        state.lastEnergyRegen = now;
+      }
+    }
   }
 
   // buffs expire
@@ -276,6 +313,8 @@ export function tick(state: EngineState, dtMs: number, className: string) {
         mob.x = mob.spawnX;
         mob.y = mob.spawnY;
         mob.respawnAt = null;
+        mob.aggroed = false;
+        mob.lastAttackAt = 0;
       }
       continue;
     }
@@ -286,6 +325,64 @@ export function tick(state: EngineState, dtMs: number, className: string) {
       mob.flashUntil = now + 200;
       pushFloating(state, mob.x, mob.y - 40, `-${mob.dotDamage}`, "#8ce26b");
       if (mob.hp <= 0) killMob(state, mob, now);
+    }
+  }
+
+  // === MOB AGGRO / CHASE / ATTACK LOGIC ===
+  if (!state.dead) {
+    for (const mob of Object.values(state.mobs)) {
+      if (!mob.alive) continue;
+
+      const distToPlayer = Math.hypot(mob.x - state.x, mob.y - state.y);
+
+      // Aggro
+      if (!mob.aggroed && distToPlayer < MOB_AGGRO_RANGE) {
+        mob.aggroed = true;
+        pushFloating(state, mob.x, mob.y - 55, "!", "#ff5555");
+      }
+
+      // De-aggro
+      if (mob.aggroed && distToPlayer > MOB_DEAGGRO_RANGE) {
+        mob.aggroed = false;
+      }
+
+      // === Chase player when aggroed ===
+      if (mob.aggroed) {
+        const chaseSpeed = 135; // slower than player
+        if (distToPlayer > MOB_ATTACK_RANGE + 15) {
+          const dx = state.x - mob.x;
+          const dy = state.y - mob.y;
+          const len = Math.hypot(dx, dy) || 1;
+          const step = (chaseSpeed * dtMs) / 1000;
+
+          const nextX = mob.x + (dx / len) * step;
+          const nextY = mob.y + (dy / len) * step;
+
+          // simple collision check
+          const box = { x: nextX - 18, y: nextY - 12, w: 36, h: 24 };
+          const blocked = buildings.some((b) => rectsIntersect(box, b));
+
+          if (!blocked) {
+            mob.x = nextX;
+            mob.y = nextY;
+          }
+        }
+      }
+
+      // Mob attacks player when aggroed
+      if (mob.aggroed && distToPlayer <= MOB_ATTACK_RANGE && now - mob.lastAttackAt >= MOB_ATTACK_INTERVAL) {
+        const incoming = Math.max(2, Math.round(mob.level * 3.8 + 4));
+        if (state.invulnUntil < now) {
+          state.hp = Math.max(0, state.hp - incoming);
+          pushFloating(state, state.x, state.y - 55, `-${incoming}`, "#ff6b6b");
+          mob.flashUntil = now + 180;
+          mob.lastAttackAt = now;
+
+          if (state.hp <= 0) {
+            killPlayer(state);
+          }
+        }
+      }
     }
   }
 
@@ -303,6 +400,7 @@ export function tick(state: EngineState, dtMs: number, className: string) {
         if (crit) dmg = Math.round(dmg * 1.6);
         mob.hp = Math.max(0, mob.hp - dmg);
         mob.flashUntil = now + 200;
+        mob.aggroed = true;
         pushFloating(state, mob.x, mob.y - 40, crit ? `${dmg}!` : `${dmg}`, crit ? "#ffd24b" : "#f4f4f4");
         state.autoAttackReadyAt = now + AUTO_ATTACK_INTERVAL;
         if (mob.hp <= 0) killMob(state, mob, now);
@@ -398,6 +496,8 @@ export function teleport(state: EngineState, toLocation: string, x: number, y: n
       dotTicksLeft: 0,
       dotNextAt: 0,
       flashUntil: 0,
+      aggroed: false,
+      lastAttackAt: 0,
     };
   }
   state.mobs = mobs;
@@ -416,6 +516,7 @@ export function selectTarget(state: EngineState, mobId: string) {
   const mob = state.mobs[mobId];
   if (!mob || !mob.alive) return;
   state.selectedTargetId = mobId;
+  mob.aggroed = true; // игрок атакует — моб становится агрессивным
 }
 
 export function useAbility(
@@ -439,7 +540,26 @@ export function useAbility(
     if (dist > attackRangeFor(className) + 60) return { ok: false, reason: "Цель слишком далеко" };
   }
 
-  state.mp -= ability.manaCost;
+  // === ROGUE RESOURCE SYSTEM ===
+  if (className === "rogue") {
+    const isGenerator = ["r1", "r2"].includes(ability.id); // Коварный удар / Удар в спину
+    const isFinisher = ["r3", "r4", "r5"].includes(ability.id); // Отравление / Потрошение / Ядовитый клинок
+
+    if (isGenerator) {
+      if (state.energy < 35) return { ok: false, reason: "Недостаточно энергии" };
+      state.energy -= 35;
+      if (state.comboPoints < 5) state.comboPoints += 1;
+    } else if (isFinisher) {
+      if (state.comboPoints < 1) return { ok: false, reason: "Нет комбо-очков" };
+      state.comboPoints = 0; // Сбрасываем комбо
+    } else {
+      if (state.energy < ability.manaCost) return { ok: false, reason: "Недостаточно энергии" };
+      state.energy -= ability.manaCost;
+    }
+  } else {
+    state.mp -= ability.manaCost;
+  }
+
   state.cooldowns[ability.id] = now + ability.cooldown * 1000;
 
   const power = isRangedClass(className) ? Math.max(stats.spellPower, stats.attack) : stats.attack;

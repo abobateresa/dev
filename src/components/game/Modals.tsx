@@ -17,17 +17,24 @@ import {
 
 export function ModalShell({ title, onClose, children, wide }: { title: string; onClose: () => void; children: ReactNode; wide?: boolean }) {
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" onMouseDown={onClose}>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4" onMouseDown={onClose}>
       <div
         onMouseDown={(e) => e.stopPropagation()}
-        className={`relative max-h-[85vh] overflow-y-auto rounded-2xl border-2 border-amber-800 bg-gradient-to-b from-[#241811] to-[#140d09] p-5 text-amber-100 shadow-[0_20px_60px_rgba(0,0,0,0.7)] ${
-          wide ? "w-full max-w-3xl" : "w-full max-w-md"
+        className={`relative max-h-[88vh] overflow-y-auto rounded-3xl border-2 border-amber-800/90 bg-gradient-to-b from-[#2a2219] to-[#140d09] p-6 text-amber-100 shadow-[0_25px_70px_rgba(0,0,0,0.85)] ${
+          wide ? "w-full max-w-4xl" : "w-full max-w-lg"
         }`}
       >
-        <div className="mb-4 flex items-center justify-between border-b border-amber-900/60 pb-3">
-          <h2 className="text-lg font-bold tracking-wide text-amber-200">{title}</h2>
-          <button onClick={onClose} className="rounded-lg p-1.5 text-amber-300 hover:bg-amber-900/40">
-            <Icon name="close" className="h-5 w-5" />
+        {/* Header */}
+        <div className="mb-5 flex items-center justify-between border-b border-amber-900/70 pb-4">
+          <div>
+            <h2 className="text-2xl font-bold tracking-[0.5px] text-amber-200">{title}</h2>
+            <div className="h-px w-12 bg-amber-700 mt-1" />
+          </div>
+          <button 
+            onClick={onClose} 
+            className="flex h-9 w-9 items-center justify-center rounded-full border border-amber-900/60 hover:bg-amber-900/30 text-amber-300 transition"
+          >
+            <Icon name="close" className="h-4 w-4" />
           </button>
         </div>
         {children}

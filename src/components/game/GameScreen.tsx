@@ -13,6 +13,7 @@ import {
   respawnPlayer,
   selectTarget,
   tick,
+  teleport,
   upgradeEquipment,
   usePotion,
   buyPotion,
@@ -26,9 +27,10 @@ import { expForLevel, type EquipmentSlot, type TalentBranch } from "@/lib/game-d
 import { TopBar } from "@/components/game/TopBar";
 import { BottomBar } from "@/components/game/BottomBar";
 import { CharacterModal, ForgeModal, HelpModal, SettingsModal, TalentsModal } from "@/components/game/Modals";
+import { WorldMap } from "@/components/game/WorldMap";
 import { useSound } from "@/components/game/useSound";
 
-type ModalKind = "character" | "talents" | "forge" | "settings" | "help" | null;
+type ModalKind = "character" | "talents" | "forge" | "settings" | "help" | "worldmap" | null;
 
 function clampCam(pos: number, viewport: number, mapSize: number) {
   if (mapSize <= viewport) return mapSize / 2;
@@ -162,6 +164,10 @@ export function GameScreen({
         const idx = Number(e.key) - 1;
         handleUseAbility(idx);
       } else if (e.key === "Escape") {
+        // Clear target, but never exit fullscreen with ESC
+        if (document.fullscreenElement) {
+          e.preventDefault();
+        }
         stateRef.current.selectedTargetId = null;
       }
     }
@@ -240,6 +246,59 @@ export function GameScreen({
     setTickN((n) => n + 1);
   }
 
+  // ПКМ — движение
+  function handleRightClick(e: React.MouseEvent<HTMLDivElement>) {
+    e.preventDefault(); // отключаем контекстное меню
+
+    const st = stateRef.current;
+    const loc = LOCATIONS[st.location] ?? LOCATIONS.city;
+    const rect = viewportRef.current?.getBoundingClientRect();
+    if (!rect) return;
+
+    const localX = e.clientX - rect.left;
+    const localY = e.clientY - rect.top;
+    const camX = clampCam(st.x, viewport.w, loc.width);
+    const camY = clampCam(st.y, viewport.h, loc.height);
+    let worldX = localX - viewport.w / 2 + camX;
+    let worldY = localY - viewport.h / 2 + camY;
+    worldX = Math.max(10, Math.min(loc.width - 10, worldX));
+    worldY = Math.max(10, Math.min(loc.height - 10, worldY));
+
+    // проверка коллизий
+    const allObstacles = loc.buildings.map((b) => ({ x: b.x, y: b.y, w: b.w, h: b.h }));
+    for (const tr of loc.trees) {
+      if (tr.collide) allObstacles.push({ x: tr.x - 18 * tr.scale, y: tr.y - 10 * tr.scale, w: 36 * tr.scale, h: 26 * tr.scale });
+    }
+    function collides(x: number, y: number) {
+      const box = { x: x - 16, y: y - 10, w: 32, h: 20 };
+      return allObstacles.some((b) => box.x < b.x + b.w && box.x + box.w > b.x && box.y < b.y + b.h && box.y + b.h > b.y);
+    }
+    if (collides(worldX, worldY)) {
+      let fx = worldX;
+      let fy = worldY;
+      for (let i = 1; i <= 25; i++) {
+        const ratio = 1 - i / 25;
+        const tx = st.x + (worldX - st.x) * ratio;
+        const ty = st.y + (worldY - st.y) * ratio;
+        if (!collides(tx, ty)) {
+          fx = tx;
+          fy = ty;
+          break;
+        }
+      }
+      worldX = fx;
+      worldY = fy;
+    }
+
+    issueMoveCommand(st, worldX, worldY);
+    setTickN((n) => n + 1);
+  }
+
+  // ЛКМ по земле — ничего (цель остаётся)
+  function handleLeftClickGround() {
+    // intentionally empty
+  }
+
   function handleGroundClick(e: React.MouseEvent<HTMLDivElement>) {
     const st = stateRef.current;
     const loc = LOCATIONS[st.location] ?? LOCATIONS.city;
@@ -299,7 +358,8 @@ export function GameScreen({
     <div className="fixed inset-0 overflow-hidden bg-black text-white select-none">
       <div
         ref={viewportRef}
-        onClick={handleGroundClick}
+        onClick={handleLeftClickGround}
+        onContextMenu={handleRightClick}
         className="absolute inset-0 cursor-crosshair overflow-hidden"
       >
         <div
@@ -378,6 +438,9 @@ export function GameScreen({
                 style={{ left: m.x, top: m.y, width: 76, height: 90 }}
               >
                 {selected && <div className="absolute inset-x-2 bottom-1 top-6 rounded-full border-2 border-red-400/80" />}
+                {m.aggroed && (
+                  <div className="absolute -top-3 left-1/2 -translate-x-1/2 text-[10px] text-red-500 font-bold">⚠</div>
+                )}
                 <div className={`relative h-full w-full ${flashing ? "brightness-150" : ""}`}>
                   <Image src="/images/monster.png" alt="" fill sizes="90px" className="object-contain drop-shadow-[0_8px_6px_rgba(0,0,0,0.6)]" />
                 </div>
@@ -531,6 +594,21 @@ export function GameScreen({
         />
       )}
       {modal === "help" && <HelpModal onClose={() => setModal(null)} />}
+
+      {modal === "worldmap" && (
+        <WorldMap
+          currentLocation={st.location}
+          onClose={() => setModal(null)}
+          onTravel={(locId) => {
+            const loc = LOCATIONS[locId];
+            if (loc) {
+              teleport(stateRef.current, locId, loc.spawn.x, loc.spawn.y);
+              setModal(null);
+              setTickN((n) => n + 1);
+            }
+          }}
+        />
+      )}
     </div>
   );
 }

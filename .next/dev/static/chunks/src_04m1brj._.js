@@ -3825,6 +3825,11 @@ const CASTER_CLASSES = new Set([
     "priest",
     "shaman"
 ]);
+// === AGGRO SYSTEM ===
+const MOB_AGGRO_RANGE = 280;
+const MOB_DEAGGRO_RANGE = 420;
+const MOB_ATTACK_INTERVAL = 1650;
+const MOB_ATTACK_RANGE = 68;
 function isRangedClass(className) {
     return className === "archer" || CASTER_CLASSES.has(className);
 }
@@ -3851,7 +3856,9 @@ function createInitialEngineState(character) {
             dotDamage: 0,
             dotTicksLeft: 0,
             dotNextAt: 0,
-            flashUntil: 0
+            flashUntil: 0,
+            aggroed: false,
+            lastAttackAt: 0
         };
     }
     return {
@@ -4020,6 +4027,8 @@ function tick(state, dtMs, className) {
                 mob.x = mob.spawnX;
                 mob.y = mob.spawnY;
                 mob.respawnAt = null;
+                mob.aggroed = false;
+                mob.lastAttackAt = 0;
             }
             continue;
         }
@@ -4030,6 +4039,59 @@ function tick(state, dtMs, className) {
             mob.flashUntil = now + 200;
             pushFloating(state, mob.x, mob.y - 40, `-${mob.dotDamage}`, "#8ce26b");
             if (mob.hp <= 0) killMob(state, mob, now);
+        }
+    }
+    // === MOB AGGRO / CHASE / ATTACK LOGIC ===
+    if (!state.dead) {
+        for (const mob of Object.values(state.mobs)){
+            if (!mob.alive) continue;
+            const distToPlayer = Math.hypot(mob.x - state.x, mob.y - state.y);
+            // Aggro
+            if (!mob.aggroed && distToPlayer < MOB_AGGRO_RANGE) {
+                mob.aggroed = true;
+                pushFloating(state, mob.x, mob.y - 55, "!", "#ff5555");
+            }
+            // De-aggro
+            if (mob.aggroed && distToPlayer > MOB_DEAGGRO_RANGE) {
+                mob.aggroed = false;
+            }
+            // === Chase player when aggroed ===
+            if (mob.aggroed) {
+                const chaseSpeed = 135; // slower than player
+                if (distToPlayer > MOB_ATTACK_RANGE + 15) {
+                    const dx = state.x - mob.x;
+                    const dy = state.y - mob.y;
+                    const len = Math.hypot(dx, dy) || 1;
+                    const step = chaseSpeed * dtMs / 1000;
+                    const nextX = mob.x + dx / len * step;
+                    const nextY = mob.y + dy / len * step;
+                    // simple collision check
+                    const box = {
+                        x: nextX - 18,
+                        y: nextY - 12,
+                        w: 36,
+                        h: 24
+                    };
+                    const blocked = buildings.some((b)=>(0, __TURBOPACK__imported__module__$5b$project$5d2f$src$2f$components$2f$game$2f$world$2d$data$2e$ts__$5b$app$2d$client$5d$__$28$ecmascript$29$__["rectsIntersect"])(box, b));
+                    if (!blocked) {
+                        mob.x = nextX;
+                        mob.y = nextY;
+                    }
+                }
+            }
+            // Mob attacks player when aggroed
+            if (mob.aggroed && distToPlayer <= MOB_ATTACK_RANGE && now - mob.lastAttackAt >= MOB_ATTACK_INTERVAL) {
+                const incoming = Math.max(2, Math.round(mob.level * 3.8 + 4));
+                if (state.invulnUntil < now) {
+                    state.hp = Math.max(0, state.hp - incoming);
+                    pushFloating(state, state.x, state.y - 55, `-${incoming}`, "#ff6b6b");
+                    mob.flashUntil = now + 180;
+                    mob.lastAttackAt = now;
+                    if (state.hp <= 0) {
+                        killPlayer(state);
+                    }
+                }
+            }
         }
     }
     // auto attack
@@ -4046,6 +4108,7 @@ function tick(state, dtMs, className) {
                 if (crit) dmg = Math.round(dmg * 1.6);
                 mob.hp = Math.max(0, mob.hp - dmg);
                 mob.flashUntil = now + 200;
+                mob.aggroed = true;
                 pushFloating(state, mob.x, mob.y - 40, crit ? `${dmg}!` : `${dmg}`, crit ? "#ffd24b" : "#f4f4f4");
                 state.autoAttackReadyAt = now + AUTO_ATTACK_INTERVAL;
                 if (mob.hp <= 0) killMob(state, mob, now);
@@ -4134,7 +4197,9 @@ function teleport(state, toLocation, x, y) {
             dotDamage: 0,
             dotTicksLeft: 0,
             dotNextAt: 0,
-            flashUntil: 0
+            flashUntil: 0,
+            aggroed: false,
+            lastAttackAt: 0
         };
     }
     state.mobs = mobs;
@@ -4151,6 +4216,7 @@ function selectTarget(state, mobId) {
     const mob = state.mobs[mobId];
     if (!mob || !mob.alive) return;
     state.selectedTargetId = mobId;
+    mob.aggroed = true; // игрок атакует — моб становится агрессивным
 }
 function useAbility(state, className, ability) {
     if (state.dead) return {
@@ -4545,12 +4611,21 @@ function TopBar(props) {
                         columnNumber: 9
                     }, this),
                     /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])(MenuButton, {
+                        icon: "map",
+                        label: "Карта мира",
+                        onClick: ()=>props.onOpen("worldmap")
+                    }, void 0, false, {
+                        fileName: "[project]/src/components/game/TopBar.tsx",
+                        lineNumber: 79,
+                        columnNumber: 9
+                    }, this),
+                    /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])(MenuButton, {
                         icon: "gear",
                         label: "Настройки",
                         onClick: ()=>props.onOpen("settings")
                     }, void 0, false, {
                         fileName: "[project]/src/components/game/TopBar.tsx",
-                        lineNumber: 79,
+                        lineNumber: 80,
                         columnNumber: 9
                     }, this),
                     /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])(MenuButton, {
@@ -4559,7 +4634,7 @@ function TopBar(props) {
                         onClick: ()=>props.onOpen("help")
                     }, void 0, false, {
                         fileName: "[project]/src/components/game/TopBar.tsx",
-                        lineNumber: 80,
+                        lineNumber: 81,
                         columnNumber: 9
                     }, this)
                 ]
@@ -4582,7 +4657,7 @@ function TopBar(props) {
                                         className: "h-5 w-5 text-yellow-400"
                                     }, void 0, false, {
                                         fileName: "[project]/src/components/game/TopBar.tsx",
-                                        lineNumber: 87,
+                                        lineNumber: 88,
                                         columnNumber: 13
                                     }, this),
                                     /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("span", {
@@ -4590,13 +4665,13 @@ function TopBar(props) {
                                         children: props.gold
                                     }, void 0, false, {
                                         fileName: "[project]/src/components/game/TopBar.tsx",
-                                        lineNumber: 88,
+                                        lineNumber: 89,
                                         columnNumber: 13
                                     }, this)
                                 ]
                             }, void 0, true, {
                                 fileName: "[project]/src/components/game/TopBar.tsx",
-                                lineNumber: 86,
+                                lineNumber: 87,
                                 columnNumber: 11
                             }, this),
                             /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("button", {
@@ -4608,12 +4683,12 @@ function TopBar(props) {
                                     className: "h-5 w-5"
                                 }, void 0, false, {
                                     fileName: "[project]/src/components/game/TopBar.tsx",
-                                    lineNumber: 95,
+                                    lineNumber: 96,
                                     columnNumber: 13
                                 }, this)
                             }, void 0, false, {
                                 fileName: "[project]/src/components/game/TopBar.tsx",
-                                lineNumber: 90,
+                                lineNumber: 91,
                                 columnNumber: 11
                             }, this),
                             /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("button", {
@@ -4625,18 +4700,18 @@ function TopBar(props) {
                                     className: "h-5 w-5"
                                 }, void 0, false, {
                                     fileName: "[project]/src/components/game/TopBar.tsx",
-                                    lineNumber: 102,
+                                    lineNumber: 103,
                                     columnNumber: 13
                                 }, this)
                             }, void 0, false, {
                                 fileName: "[project]/src/components/game/TopBar.tsx",
-                                lineNumber: 97,
+                                lineNumber: 98,
                                 columnNumber: 11
                             }, this)
                         ]
                     }, void 0, true, {
                         fileName: "[project]/src/components/game/TopBar.tsx",
-                        lineNumber: 85,
+                        lineNumber: 86,
                         columnNumber: 9
                     }, this),
                     /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
@@ -4649,7 +4724,7 @@ function TopBar(props) {
                                 }
                             }, void 0, false, {
                                 fileName: "[project]/src/components/game/TopBar.tsx",
-                                lineNumber: 106,
+                                lineNumber: 107,
                                 columnNumber: 11
                             }, this),
                             props.portals.map((p, i)=>/*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
@@ -4660,7 +4735,7 @@ function TopBar(props) {
                                     }
                                 }, i, false, {
                                     fileName: "[project]/src/components/game/TopBar.tsx",
-                                    lineNumber: 108,
+                                    lineNumber: 109,
                                     columnNumber: 13
                                 }, this)),
                             props.mobDots.map((m, i)=>/*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
@@ -4672,7 +4747,7 @@ function TopBar(props) {
                                     }
                                 }, i, false, {
                                     fileName: "[project]/src/components/game/TopBar.tsx",
-                                    lineNumber: 115,
+                                    lineNumber: 116,
                                     columnNumber: 13
                                 }, this)),
                             /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
@@ -4683,7 +4758,7 @@ function TopBar(props) {
                                 }
                             }, void 0, false, {
                                 fileName: "[project]/src/components/game/TopBar.tsx",
-                                lineNumber: 125,
+                                lineNumber: 126,
                                 columnNumber: 11
                             }, this),
                             /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
@@ -4691,19 +4766,19 @@ function TopBar(props) {
                                 children: props.locationName
                             }, void 0, false, {
                                 fileName: "[project]/src/components/game/TopBar.tsx",
-                                lineNumber: 129,
+                                lineNumber: 130,
                                 columnNumber: 11
                             }, this)
                         ]
                     }, void 0, true, {
                         fileName: "[project]/src/components/game/TopBar.tsx",
-                        lineNumber: 105,
+                        lineNumber: 106,
                         columnNumber: 9
                     }, this)
                 ]
             }, void 0, true, {
                 fileName: "[project]/src/components/game/TopBar.tsx",
-                lineNumber: 84,
+                lineNumber: 85,
                 columnNumber: 7
             }, this)
         ]
@@ -5984,10 +6059,16 @@ var __TURBOPACK__imported__module__$5b$project$5d2f$src$2f$lib$2f$game$2d$data$2
 var __TURBOPACK__imported__module__$5b$project$5d2f$src$2f$components$2f$game$2f$TopBar$2e$tsx__$5b$app$2d$client$5d$__$28$ecmascript$29$__ = __turbopack_context__.i("[project]/src/components/game/TopBar.tsx [app-client] (ecmascript)");
 var __TURBOPACK__imported__module__$5b$project$5d2f$src$2f$components$2f$game$2f$BottomBar$2e$tsx__$5b$app$2d$client$5d$__$28$ecmascript$29$__ = __turbopack_context__.i("[project]/src/components/game/BottomBar.tsx [app-client] (ecmascript)");
 var __TURBOPACK__imported__module__$5b$project$5d2f$src$2f$components$2f$game$2f$Modals$2e$tsx__$5b$app$2d$client$5d$__$28$ecmascript$29$__ = __turbopack_context__.i("[project]/src/components/game/Modals.tsx [app-client] (ecmascript)");
+(()=>{
+    const e = new Error("Cannot find module '@/components/game/WorldMap'");
+    e.code = 'MODULE_NOT_FOUND';
+    throw e;
+})();
 var __TURBOPACK__imported__module__$5b$project$5d2f$src$2f$components$2f$game$2f$useSound$2e$ts__$5b$app$2d$client$5d$__$28$ecmascript$29$__ = __turbopack_context__.i("[project]/src/components/game/useSound.ts [app-client] (ecmascript)");
 ;
 var _s = __turbopack_context__.k.signature();
 "use client";
+;
 ;
 ;
 ;
@@ -6145,6 +6226,10 @@ function GameScreen({ character, onExitToSelect, onLogout }) {
                     const idx = Number(e.key) - 1;
                     handleUseAbility(idx);
                 } else if (e.key === "Escape") {
+                    // Clear target, but never exit fullscreen with ESC
+                    if (document.fullscreenElement) {
+                        e.preventDefault();
+                    }
                     stateRef.current.selectedTargetId = null;
                 }
             }
@@ -6241,6 +6326,68 @@ function GameScreen({ character, onExitToSelect, onLogout }) {
         (0, __TURBOPACK__imported__module__$5b$project$5d2f$src$2f$components$2f$game$2f$engine$2e$ts__$5b$app$2d$client$5d$__$28$ecmascript$29$__["moveToPortal"])(stateRef.current, px, py, toLocation, toX, toY);
         setTickN((n)=>n + 1);
     }
+    // ПКМ — движение
+    function handleRightClick(e) {
+        e.preventDefault(); // отключаем контекстное меню
+        const st = stateRef.current;
+        const loc = __TURBOPACK__imported__module__$5b$project$5d2f$src$2f$components$2f$game$2f$world$2d$data$2e$ts__$5b$app$2d$client$5d$__$28$ecmascript$29$__["LOCATIONS"][st.location] ?? __TURBOPACK__imported__module__$5b$project$5d2f$src$2f$components$2f$game$2f$world$2d$data$2e$ts__$5b$app$2d$client$5d$__$28$ecmascript$29$__["LOCATIONS"].city;
+        const rect = viewportRef.current?.getBoundingClientRect();
+        if (!rect) return;
+        const localX = e.clientX - rect.left;
+        const localY = e.clientY - rect.top;
+        const camX = clampCam(st.x, viewport.w, loc.width);
+        const camY = clampCam(st.y, viewport.h, loc.height);
+        let worldX = localX - viewport.w / 2 + camX;
+        let worldY = localY - viewport.h / 2 + camY;
+        worldX = Math.max(10, Math.min(loc.width - 10, worldX));
+        worldY = Math.max(10, Math.min(loc.height - 10, worldY));
+        // проверка коллизий
+        const allObstacles = loc.buildings.map((b)=>({
+                x: b.x,
+                y: b.y,
+                w: b.w,
+                h: b.h
+            }));
+        for (const tr of loc.trees){
+            if (tr.collide) allObstacles.push({
+                x: tr.x - 18 * tr.scale,
+                y: tr.y - 10 * tr.scale,
+                w: 36 * tr.scale,
+                h: 26 * tr.scale
+            });
+        }
+        function collides(x, y) {
+            const box = {
+                x: x - 16,
+                y: y - 10,
+                w: 32,
+                h: 20
+            };
+            return allObstacles.some((b)=>box.x < b.x + b.w && box.x + box.w > b.x && box.y < b.y + b.h && box.y + b.h > b.y);
+        }
+        if (collides(worldX, worldY)) {
+            let fx = worldX;
+            let fy = worldY;
+            for(let i = 1; i <= 25; i++){
+                const ratio = 1 - i / 25;
+                const tx = st.x + (worldX - st.x) * ratio;
+                const ty = st.y + (worldY - st.y) * ratio;
+                if (!collides(tx, ty)) {
+                    fx = tx;
+                    fy = ty;
+                    break;
+                }
+            }
+            worldX = fx;
+            worldY = fy;
+        }
+        (0, __TURBOPACK__imported__module__$5b$project$5d2f$src$2f$components$2f$game$2f$engine$2e$ts__$5b$app$2d$client$5d$__$28$ecmascript$29$__["issueMoveCommand"])(st, worldX, worldY);
+        setTickN((n)=>n + 1);
+    }
+    // ЛКМ по земле — ничего (цель остаётся)
+    function handleLeftClickGround() {
+    // intentionally empty
+    }
     function handleGroundClick(e) {
         const st = stateRef.current;
         const loc = __TURBOPACK__imported__module__$5b$project$5d2f$src$2f$components$2f$game$2f$world$2d$data$2e$ts__$5b$app$2d$client$5d$__$28$ecmascript$29$__["LOCATIONS"][st.location] ?? __TURBOPACK__imported__module__$5b$project$5d2f$src$2f$components$2f$game$2f$world$2d$data$2e$ts__$5b$app$2d$client$5d$__$28$ecmascript$29$__["LOCATIONS"].city;
@@ -6312,7 +6459,8 @@ function GameScreen({ character, onExitToSelect, onLogout }) {
         children: [
             /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
                 ref: viewportRef,
-                onClick: handleGroundClick,
+                onClick: handleLeftClickGround,
+                onContextMenu: handleRightClick,
                 className: "absolute inset-0 cursor-crosshair overflow-hidden",
                 children: /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
                     className: "absolute left-0 top-0",
@@ -6333,7 +6481,7 @@ function GameScreen({ character, onExitToSelect, onLogout }) {
                             }
                         }, void 0, false, {
                             fileName: "[project]/src/components/game/GameScreen.tsx",
-                            lineNumber: 317,
+                            lineNumber: 377,
                             columnNumber: 13
                         }, this),
                         loc.trees.map((t)=>/*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
@@ -6352,12 +6500,12 @@ function GameScreen({ character, onExitToSelect, onLogout }) {
                                     className: "object-contain drop-shadow-[0_10px_6px_rgba(0,0,0,0.5)]"
                                 }, void 0, false, {
                                     fileName: "[project]/src/components/game/GameScreen.tsx",
-                                    lineNumber: 330,
+                                    lineNumber: 390,
                                     columnNumber: 15
                                 }, this)
                             }, t.id, false, {
                                 fileName: "[project]/src/components/game/GameScreen.tsx",
-                                lineNumber: 325,
+                                lineNumber: 385,
                                 columnNumber: 13
                             }, this)),
                         loc.buildings.map((b)=>/*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
@@ -6377,7 +6525,7 @@ function GameScreen({ character, onExitToSelect, onLogout }) {
                                         className: "object-fill drop-shadow-[0_14px_10px_rgba(0,0,0,0.6)]"
                                     }, void 0, false, {
                                         fileName: "[project]/src/components/game/GameScreen.tsx",
-                                        lineNumber: 337,
+                                        lineNumber: 397,
                                         columnNumber: 15
                                     }, this),
                                     b.label && /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
@@ -6389,13 +6537,13 @@ function GameScreen({ character, onExitToSelect, onLogout }) {
                                         ]
                                     }, void 0, true, {
                                         fileName: "[project]/src/components/game/GameScreen.tsx",
-                                        lineNumber: 339,
+                                        lineNumber: 399,
                                         columnNumber: 17
                                     }, this)
                                 ]
                             }, b.id, true, {
                                 fileName: "[project]/src/components/game/GameScreen.tsx",
-                                lineNumber: 336,
+                                lineNumber: 396,
                                 columnNumber: 13
                             }, this)),
                         loc.portals.map((p, i)=>/*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
@@ -6413,7 +6561,7 @@ function GameScreen({ character, onExitToSelect, onLogout }) {
                                         className: "portal-swirl h-16 w-16 rounded-full"
                                     }, void 0, false, {
                                         fileName: "[project]/src/components/game/GameScreen.tsx",
-                                        lineNumber: 357,
+                                        lineNumber: 417,
                                         columnNumber: 15
                                     }, this),
                                     /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
@@ -6421,13 +6569,13 @@ function GameScreen({ character, onExitToSelect, onLogout }) {
                                         children: p.label
                                     }, void 0, false, {
                                         fileName: "[project]/src/components/game/GameScreen.tsx",
-                                        lineNumber: 358,
+                                        lineNumber: 418,
                                         columnNumber: 15
                                     }, this)
                                 ]
                             }, i, true, {
                                 fileName: "[project]/src/components/game/GameScreen.tsx",
-                                lineNumber: 348,
+                                lineNumber: 408,
                                 columnNumber: 13
                             }, this)),
                         Object.values(st.mobs).map((m)=>{
@@ -6452,8 +6600,16 @@ function GameScreen({ character, onExitToSelect, onLogout }) {
                                         className: "absolute inset-x-2 bottom-1 top-6 rounded-full border-2 border-red-400/80"
                                     }, void 0, false, {
                                         fileName: "[project]/src/components/game/GameScreen.tsx",
-                                        lineNumber: 380,
+                                        lineNumber: 440,
                                         columnNumber: 30
+                                    }, this),
+                                    m.aggroed && /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
+                                        className: "absolute -top-3 left-1/2 -translate-x-1/2 text-[10px] text-red-500 font-bold",
+                                        children: "⚠"
+                                    }, void 0, false, {
+                                        fileName: "[project]/src/components/game/GameScreen.tsx",
+                                        lineNumber: 442,
+                                        columnNumber: 19
                                     }, this),
                                     /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
                                         className: `relative h-full w-full ${flashing ? "brightness-150" : ""}`,
@@ -6465,12 +6621,12 @@ function GameScreen({ character, onExitToSelect, onLogout }) {
                                             className: "object-contain drop-shadow-[0_8px_6px_rgba(0,0,0,0.6)]"
                                         }, void 0, false, {
                                             fileName: "[project]/src/components/game/GameScreen.tsx",
-                                            lineNumber: 382,
+                                            lineNumber: 445,
                                             columnNumber: 19
                                         }, this)
                                     }, void 0, false, {
                                         fileName: "[project]/src/components/game/GameScreen.tsx",
-                                        lineNumber: 381,
+                                        lineNumber: 444,
                                         columnNumber: 17
                                     }, this),
                                     /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
@@ -6483,7 +6639,7 @@ function GameScreen({ character, onExitToSelect, onLogout }) {
                                         ]
                                     }, void 0, true, {
                                         fileName: "[project]/src/components/game/GameScreen.tsx",
-                                        lineNumber: 384,
+                                        lineNumber: 447,
                                         columnNumber: 17
                                     }, this),
                                     /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
@@ -6495,18 +6651,18 @@ function GameScreen({ character, onExitToSelect, onLogout }) {
                                             }
                                         }, void 0, false, {
                                             fileName: "[project]/src/components/game/GameScreen.tsx",
-                                            lineNumber: 388,
+                                            lineNumber: 451,
                                             columnNumber: 19
                                         }, this)
                                     }, void 0, false, {
                                         fileName: "[project]/src/components/game/GameScreen.tsx",
-                                        lineNumber: 387,
+                                        lineNumber: 450,
                                         columnNumber: 17
                                     }, this)
                                 ]
                             }, m.spawnId, true, {
                                 fileName: "[project]/src/components/game/GameScreen.tsx",
-                                lineNumber: 371,
+                                lineNumber: 431,
                                 columnNumber: 15
                             }, this);
                         }),
@@ -6529,7 +6685,7 @@ function GameScreen({ character, onExitToSelect, onLogout }) {
                                     ]
                                 }, void 0, true, {
                                     fileName: "[project]/src/components/game/GameScreen.tsx",
-                                    lineNumber: 400,
+                                    lineNumber: 463,
                                     columnNumber: 15
                                 }, this),
                                 /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
@@ -6541,12 +6697,12 @@ function GameScreen({ character, onExitToSelect, onLogout }) {
                                         }
                                     }, void 0, false, {
                                         fileName: "[project]/src/components/game/GameScreen.tsx",
-                                        lineNumber: 405,
+                                        lineNumber: 468,
                                         columnNumber: 15
                                     }, this)
                                 }, void 0, false, {
                                     fileName: "[project]/src/components/game/GameScreen.tsx",
-                                    lineNumber: 404,
+                                    lineNumber: 467,
                                     columnNumber: 13
                                 }, this),
                                 /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
@@ -6563,25 +6719,25 @@ function GameScreen({ character, onExitToSelect, onLogout }) {
                                         className: "object-contain drop-shadow-[0_10px_8px_rgba(0,0,0,0.6)]"
                                     }, void 0, false, {
                                         fileName: "[project]/src/components/game/GameScreen.tsx",
-                                        lineNumber: 414,
+                                        lineNumber: 477,
                                         columnNumber: 15
                                     }, this)
                                 }, void 0, false, {
                                     fileName: "[project]/src/components/game/GameScreen.tsx",
-                                    lineNumber: 407,
+                                    lineNumber: 470,
                                     columnNumber: 13
                                 }, this),
                                 isRanged && /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
                                     className: "absolute -bottom-1 left-1/2 h-1 w-1 -translate-x-1/2"
                                 }, void 0, false, {
                                     fileName: "[project]/src/components/game/GameScreen.tsx",
-                                    lineNumber: 416,
+                                    lineNumber: 479,
                                     columnNumber: 26
                                 }, this)
                             ]
                         }, void 0, true, {
                             fileName: "[project]/src/components/game/GameScreen.tsx",
-                            lineNumber: 395,
+                            lineNumber: 458,
                             columnNumber: 11
                         }, this),
                         st.floatingTexts.map((f)=>{
@@ -6600,19 +6756,19 @@ function GameScreen({ character, onExitToSelect, onLogout }) {
                                 children: f.text
                             }, f.id, false, {
                                 fileName: "[project]/src/components/game/GameScreen.tsx",
-                                lineNumber: 426,
+                                lineNumber: 489,
                                 columnNumber: 15
                             }, this);
                         })
                     ]
                 }, void 0, true, {
                     fileName: "[project]/src/components/game/GameScreen.tsx",
-                    lineNumber: 305,
+                    lineNumber: 365,
                     columnNumber: 9
                 }, this)
             }, void 0, false, {
                 fileName: "[project]/src/components/game/GameScreen.tsx",
-                lineNumber: 300,
+                lineNumber: 359,
                 columnNumber: 7
             }, this),
             st.message && /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
@@ -6620,7 +6776,7 @@ function GameScreen({ character, onExitToSelect, onLogout }) {
                 children: st.message
             }, void 0, false, {
                 fileName: "[project]/src/components/game/GameScreen.tsx",
-                lineNumber: 439,
+                lineNumber: 502,
                 columnNumber: 9
             }, this),
             /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])(__TURBOPACK__imported__module__$5b$project$5d2f$src$2f$components$2f$game$2f$TopBar$2e$tsx__$5b$app$2d$client$5d$__$28$ecmascript$29$__["TopBar"], {
@@ -6657,7 +6813,7 @@ function GameScreen({ character, onExitToSelect, onLogout }) {
                 onLogout: onLogout
             }, void 0, false, {
                 fileName: "[project]/src/components/game/GameScreen.tsx",
-                lineNumber: 444,
+                lineNumber: 507,
                 columnNumber: 7
             }, this),
             /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])(__TURBOPACK__imported__module__$5b$project$5d2f$src$2f$components$2f$game$2f$BottomBar$2e$tsx__$5b$app$2d$client$5d$__$28$ecmascript$29$__["BottomBar"], {
@@ -6681,7 +6837,7 @@ function GameScreen({ character, onExitToSelect, onLogout }) {
                 onUsePotion: handleUsePotion
             }, void 0, false, {
                 fileName: "[project]/src/components/game/GameScreen.tsx",
-                lineNumber: 465,
+                lineNumber: 528,
                 columnNumber: 7
             }, this),
             modal === "character" && /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])(__TURBOPACK__imported__module__$5b$project$5d2f$src$2f$components$2f$game$2f$Modals$2e$tsx__$5b$app$2d$client$5d$__$28$ecmascript$29$__["CharacterModal"], {
@@ -6696,7 +6852,7 @@ function GameScreen({ character, onExitToSelect, onLogout }) {
                 stats: stats
             }, void 0, false, {
                 fileName: "[project]/src/components/game/GameScreen.tsx",
-                lineNumber: 487,
+                lineNumber: 550,
                 columnNumber: 9
             }, this),
             modal === "talents" && /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])(__TURBOPACK__imported__module__$5b$project$5d2f$src$2f$components$2f$game$2f$Modals$2e$tsx__$5b$app$2d$client$5d$__$28$ecmascript$29$__["TalentsModal"], {
@@ -6706,7 +6862,7 @@ function GameScreen({ character, onExitToSelect, onLogout }) {
                 onSpend: handleSpendTalent
             }, void 0, false, {
                 fileName: "[project]/src/components/game/GameScreen.tsx",
-                lineNumber: 500,
+                lineNumber: 563,
                 columnNumber: 9
             }, this),
             modal === "forge" && /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])(__TURBOPACK__imported__module__$5b$project$5d2f$src$2f$components$2f$game$2f$Modals$2e$tsx__$5b$app$2d$client$5d$__$28$ecmascript$29$__["ForgeModal"], {
@@ -6717,7 +6873,7 @@ function GameScreen({ character, onExitToSelect, onLogout }) {
                 onBuyPotion: handleBuyPotion
             }, void 0, false, {
                 fileName: "[project]/src/components/game/GameScreen.tsx",
-                lineNumber: 503,
+                lineNumber: 566,
                 columnNumber: 9
             }, this),
             modal === "settings" && /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])(__TURBOPACK__imported__module__$5b$project$5d2f$src$2f$components$2f$game$2f$Modals$2e$tsx__$5b$app$2d$client$5d$__$28$ecmascript$29$__["SettingsModal"], {
@@ -6747,20 +6903,36 @@ function GameScreen({ character, onExitToSelect, onLogout }) {
                 }
             }, void 0, false, {
                 fileName: "[project]/src/components/game/GameScreen.tsx",
-                lineNumber: 506,
+                lineNumber: 569,
                 columnNumber: 9
             }, this),
             modal === "help" && /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])(__TURBOPACK__imported__module__$5b$project$5d2f$src$2f$components$2f$game$2f$Modals$2e$tsx__$5b$app$2d$client$5d$__$28$ecmascript$29$__["HelpModal"], {
                 onClose: ()=>setModal(null)
             }, void 0, false, {
                 fileName: "[project]/src/components/game/GameScreen.tsx",
-                lineNumber: 533,
+                lineNumber: 596,
                 columnNumber: 28
+            }, this),
+            modal === "worldmap" && /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])(WorldMap, {
+                currentLocation: st.location,
+                onClose: ()=>setModal(null),
+                onTravel: (locId)=>{
+                    const loc = __TURBOPACK__imported__module__$5b$project$5d2f$src$2f$components$2f$game$2f$world$2d$data$2e$ts__$5b$app$2d$client$5d$__$28$ecmascript$29$__["LOCATIONS"][locId];
+                    if (loc) {
+                        (0, __TURBOPACK__imported__module__$5b$project$5d2f$src$2f$components$2f$game$2f$engine$2e$ts__$5b$app$2d$client$5d$__$28$ecmascript$29$__["teleport"])(stateRef.current, locId, loc.spawn.x, loc.spawn.y);
+                        setModal(null);
+                        setTickN((n)=>n + 1);
+                    }
+                }
+            }, void 0, false, {
+                fileName: "[project]/src/components/game/GameScreen.tsx",
+                lineNumber: 599,
+                columnNumber: 9
             }, this)
         ]
     }, void 0, true, {
         fileName: "[project]/src/components/game/GameScreen.tsx",
-        lineNumber: 299,
+        lineNumber: 358,
         columnNumber: 5
     }, this);
 }
