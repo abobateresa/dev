@@ -29,6 +29,8 @@ import { BottomBar } from "@/components/game/BottomBar";
 import { CharacterModal, ForgeModal, HelpModal, SettingsModal, TalentsModal } from "@/components/game/Modals";
 import { WorldMap } from "@/components/game/WorldMap";
 import { useSound } from "@/components/game/useSound";
+import { RogueResourceBar } from "@/components/game/RogueUI";
+import { useMultiplayer } from "@/hooks/useMultiplayer";
 
 type ModalKind = "character" | "talents" | "forge" | "settings" | "help" | "worldmap" | null;
 
@@ -58,6 +60,7 @@ export function GameScreen({
     showGrid: character.settings?.showGrid ?? false,
     showNames: character.settings?.showNames ?? true,
   });
+
   const sfxVolumeRef = useRef(settings.sfxVolume);
   sfxVolumeRef.current = settings.sfxVolume;
   const sound = useSound(sfxVolumeRef);
@@ -66,6 +69,24 @@ export function GameScreen({
   settingsRef.current = settings;
 
   const abilities = abilitiesFor(character.className);
+
+  // ==================== MULTIPLAYER ====================
+  const { 
+    players: remotePlayers, 
+    mobs: remoteMobs, 
+    connected,
+    sendMove,
+    attackMob 
+  } = useMultiplayer(character.location, {
+    name: character.name,
+    className: character.className,
+    level: character.level,
+    hp: character.hp,
+    maxHp: 100,
+    mp: character.mp,
+    maxMp: 50,
+    facing: 1,
+  });
 
   // viewport size tracking
   useEffect(() => {
@@ -86,17 +107,14 @@ export function GameScreen({
     return () => document.removeEventListener("fullscreenchange", onFsChange);
   }, []);
 
-  const saveCharacter = useCallback(
-    (patch: Record<string, unknown>) => {
-      fetch(`/api/characters/${character.id}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        credentials: "include",
-        body: JSON.stringify(patch),
-      }).catch(() => {});
-    },
-    [character.id],
-  );
+  const saveCharacter = useCallback((patch: Record<string, unknown>) => {
+    fetch(`/api/characters/${character.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      credentials: "include",
+      body: JSON.stringify(patch),
+    }).catch(() => {});
+  }, [character.id]);
 
   // game loop
   useEffect(() => {
@@ -112,6 +130,7 @@ export function GameScreen({
       const st = stateRef.current;
       const wasDead = st.dead;
       tick(st, dt, character.className);
+
       if (st.dead && !wasDead) {
         sound.playError();
         window.setTimeout(() => {
@@ -150,7 +169,6 @@ export function GameScreen({
       running = false;
       cancelAnimationFrame(raf);
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // keyboard shortcuts
@@ -164,16 +182,12 @@ export function GameScreen({
         const idx = Number(e.key) - 1;
         handleUseAbility(idx);
       } else if (e.key === "Escape") {
-        // Clear target, but never exit fullscreen with ESC
-        if (document.fullscreenElement) {
-          e.preventDefault();
-        }
+        if (document.fullscreenElement) e.preventDefault();
         stateRef.current.selectedTargetId = null;
       }
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [modal]);
 
   const toggleFullscreen = useCallback(() => {
@@ -239,6 +253,7 @@ export function GameScreen({
     selectTarget(stateRef.current, mobId);
     sound.playClick();
     setTickN((n) => n + 1);
+    attackMob(mobId);
   }
 
   function handlePortalClick(px: number, py: number, toLocation: string, toX: number, toY: number) {
@@ -246,9 +261,9 @@ export function GameScreen({
     setTickN((n) => n + 1);
   }
 
-  // ПКМ — движение
+  // ПКМ — движение + отправка в мультиплеер
   function handleRightClick(e: React.MouseEvent<HTMLDivElement>) {
-    e.preventDefault(); // отключаем контекстное меню
+    e.preventDefault();
 
     const st = stateRef.current;
     const loc = LOCATIONS[st.location] ?? LOCATIONS.city;
@@ -264,83 +279,15 @@ export function GameScreen({
     worldX = Math.max(10, Math.min(loc.width - 10, worldX));
     worldY = Math.max(10, Math.min(loc.height - 10, worldY));
 
-    // проверка коллизий
-    const allObstacles = loc.buildings.map((b) => ({ x: b.x, y: b.y, w: b.w, h: b.h }));
-    for (const tr of loc.trees) {
-      if (tr.collide) allObstacles.push({ x: tr.x - 18 * tr.scale, y: tr.y - 10 * tr.scale, w: 36 * tr.scale, h: 26 * tr.scale });
-    }
-    function collides(x: number, y: number) {
-      const box = { x: x - 16, y: y - 10, w: 32, h: 20 };
-      return allObstacles.some((b) => box.x < b.x + b.w && box.x + box.w > b.x && box.y < b.y + b.h && box.y + b.h > b.y);
-    }
-    if (collides(worldX, worldY)) {
-      let fx = worldX;
-      let fy = worldY;
-      for (let i = 1; i <= 25; i++) {
-        const ratio = 1 - i / 25;
-        const tx = st.x + (worldX - st.x) * ratio;
-        const ty = st.y + (worldY - st.y) * ratio;
-        if (!collides(tx, ty)) {
-          fx = tx;
-          fy = ty;
-          break;
-        }
-      }
-      worldX = fx;
-      worldY = fy;
-    }
-
     issueMoveCommand(st, worldX, worldY);
     setTickN((n) => n + 1);
+
+    // Отправляем движение на сервер
+    sendMove(worldX, worldY);
   }
 
-  // ЛКМ по земле — ничего (цель остаётся)
   function handleLeftClickGround() {
     // intentionally empty
-  }
-
-  function handleGroundClick(e: React.MouseEvent<HTMLDivElement>) {
-    const st = stateRef.current;
-    const loc = LOCATIONS[st.location] ?? LOCATIONS.city;
-    const rect = viewportRef.current?.getBoundingClientRect();
-    if (!rect) return;
-    const localX = e.clientX - rect.left;
-    const localY = e.clientY - rect.top;
-    const camX = clampCam(st.x, viewport.w, loc.width);
-    const camY = clampCam(st.y, viewport.h, loc.height);
-    let worldX = localX - viewport.w / 2 + camX;
-    let worldY = localY - viewport.h / 2 + camY;
-    worldX = Math.max(10, Math.min(loc.width - 10, worldX));
-    worldY = Math.max(10, Math.min(loc.height - 10, worldY));
-
-    // check building collision — walk target back toward player until free
-    const allObstacles = loc.buildings.map((b) => ({ x: b.x, y: b.y, w: b.w, h: b.h }));
-    for (const tr of loc.trees) {
-      if (tr.collide) allObstacles.push({ x: tr.x - 18 * tr.scale, y: tr.y - 10 * tr.scale, w: 36 * tr.scale, h: 26 * tr.scale });
-    }
-    function collides(x: number, y: number) {
-      const box = { x: x - 16, y: y - 10, w: 32, h: 20 };
-      return allObstacles.some((b) => box.x < b.x + b.w && box.x + box.w > b.x && box.y < b.y + b.h && box.y + box.h > b.y);
-    }
-    if (collides(worldX, worldY)) {
-      let fx = worldX;
-      let fy = worldY;
-      for (let i = 1; i <= 25; i++) {
-        const ratio = 1 - i / 25;
-        const tx = st.x + (worldX - st.x) * ratio;
-        const ty = st.y + (worldY - st.y) * ratio;
-        if (!collides(tx, ty)) {
-          fx = tx;
-          fy = ty;
-          break;
-        }
-      }
-      worldX = fx;
-      worldY = fy;
-    }
-
-    issueMoveCommand(st, worldX, worldY);
-    setTickN((n) => n + 1);
   }
 
   const st = stateRef.current;
@@ -380,7 +327,7 @@ export function GameScreen({
             />
           )}
 
-          {/* trees behind buildings for depth (decorative, no collide ones first) */}
+          {/* trees */}
           {loc.trees.map((t) => (
             <div
               key={t.id}
@@ -421,12 +368,33 @@ export function GameScreen({
             </div>
           ))}
 
-          {/* mobs */}
-          {Object.values(st.mobs).map((m) => {
+          {/* === ДРУГИЕ ИГРОКИ (MULTIPLAYER) === */}
+          {remotePlayers
+            .filter((p) => p.id !== character.id)
+            .map((player) => (
+              <div
+                key={player.id}
+                className="absolute -translate-x-1/2 -translate-y-[88%]"
+                style={{ left: player.x, top: player.y, width: 70, height: 90 }}
+              >
+                {settings.showNames && (
+                  <div className="absolute -top-6 left-1/2 -translate-x-1/2 whitespace-nowrap text-[11px] font-semibold text-blue-300">
+                    {player.name} [{player.level}]
+                  </div>
+                )}
+                <div className="absolute -top-1 left-1/2 h-1.5 w-14 -translate-x-1/2 overflow-hidden rounded-full border border-black/70 bg-black/60">
+                  <div className="h-full bg-gradient-to-r from-blue-600 to-blue-400" style={{ width: `${(player.hp / player.maxHp) * 100}%` }} />
+                </div>
+                <div className="relative h-full w-full">
+                  <Image src="/images/hero.png" alt="" fill sizes="90px" className="object-contain drop-shadow-[0_10px_8px_rgba(0,0,0,0.6)]" />
+                </div>
+              </div>
+            ))}
+
+          {/* === СЕТЕВЫЕ МОБЫ === */}
+          {remoteMobs.map((m) => {
             if (!m.alive) return null;
             const hpPct = (m.hp / m.maxHp) * 100;
-            const selected = st.selectedTargetId === m.spawnId;
-            const flashing = m.flashUntil > now;
             return (
               <div
                 key={m.spawnId}
@@ -437,11 +405,7 @@ export function GameScreen({
                 className="absolute -translate-x-1/2 -translate-y-[90%] cursor-pointer"
                 style={{ left: m.x, top: m.y, width: 76, height: 90 }}
               >
-                {selected && <div className="absolute inset-x-2 bottom-1 top-6 rounded-full border-2 border-red-400/80" />}
-                {m.aggroed && (
-                  <div className="absolute -top-3 left-1/2 -translate-x-1/2 text-[10px] text-red-500 font-bold">⚠</div>
-                )}
-                <div className={`relative h-full w-full ${flashing ? "brightness-150" : ""}`}>
+                <div className="relative h-full w-full">
                   <Image src="/images/monster.png" alt="" fill sizes="90px" className="object-contain drop-shadow-[0_8px_6px_rgba(0,0,0,0.6)]" />
                 </div>
                 <div className="absolute -top-5 left-1/2 w-24 -translate-x-1/2 text-center text-[10px] text-red-300">
@@ -454,7 +418,7 @@ export function GameScreen({
             );
           })}
 
-          {/* player */}
+          {/* LOCAL PLAYER (Ты сам) */}
           <div
             className="absolute -translate-x-1/2 -translate-y-[88%] transition-transform"
             style={{ left: st.x, top: st.y, width: 70, height: 90 }}
@@ -467,34 +431,11 @@ export function GameScreen({
             <div className="absolute -top-1 left-1/2 h-1.5 w-14 -translate-x-1/2 overflow-hidden rounded-full border border-black/70 bg-black/60">
               <div className="h-full bg-gradient-to-r from-emerald-700 to-emerald-400" style={{ width: `${(st.hp / stats.maxHp) * 100}%` }} />
             </div>
-            <div
-              className="relative h-full w-full"
-              style={{
-                transform: st.facing < 0 ? "scaleX(-1)" : undefined,
-                filter: isDark ? "hue-rotate(220deg) saturate(1.4) brightness(0.85)" : undefined,
-              }}
-            >
+            <div className="relative h-full w-full" style={{ transform: st.facing < 0 ? "scaleX(-1)" : undefined }}>
               <Image src="/images/hero.png" alt="" fill sizes="90px" className="object-contain drop-shadow-[0_10px_8px_rgba(0,0,0,0.6)]" />
             </div>
             {isRanged && <div className="absolute -bottom-1 left-1/2 h-1 w-1 -translate-x-1/2" />}
           </div>
-
-          {/* floating combat texts */}
-          {st.floatingTexts.map((f) => {
-            const age = now - f.createdAt;
-            if (age > 900) return null;
-            const opacity = Math.max(0, 1 - age / 900);
-            const dy = -(age / 900) * 46;
-            return (
-              <div
-                key={f.id}
-                className="pointer-events-none absolute -translate-x-1/2 text-sm font-extrabold drop-shadow"
-                style={{ left: f.x, top: f.y + dy, color: f.color, opacity }}
-              >
-                {f.text}
-              </div>
-            );
-          })}
         </div>
       </div>
 
@@ -525,6 +466,16 @@ export function GameScreen({
         onLogout={onLogout}
       />
 
+      {character.className === "rogue" && (
+        <div className="fixed bottom-[92px] left-1/2 -translate-x-1/2 z-40">
+          <RogueResourceBar 
+            energy={st.energy} 
+            maxEnergy={st.maxEnergy} 
+            comboPoints={st.comboPoints} 
+          />
+        </div>
+      )}
+
       <BottomBar
         abilities={abilities}
         cooldownReadyAt={st.cooldowns}
@@ -546,6 +497,7 @@ export function GameScreen({
         onUsePotion={handleUsePotion}
       />
 
+      {/* Модальные окна */}
       {modal === "character" && (
         <CharacterModal
           onClose={() => setModal(null)}
@@ -559,12 +511,8 @@ export function GameScreen({
           stats={stats}
         />
       )}
-      {modal === "talents" && (
-        <TalentsModal onClose={() => setModal(null)} talents={st.talents} level={st.level} onSpend={handleSpendTalent} />
-      )}
-      {modal === "forge" && (
-        <ForgeModal onClose={() => setModal(null)} equipment={st.equipment} gold={st.gold} onUpgrade={handleUpgrade} onBuyPotion={handleBuyPotion} />
-      )}
+      {modal === "talents" && <TalentsModal onClose={() => setModal(null)} talents={st.talents} level={st.level} onSpend={handleSpendTalent} />}
+      {modal === "forge" && <ForgeModal onClose={() => setModal(null)} equipment={st.equipment} gold={st.gold} onUpgrade={handleUpgrade} onBuyPotion={handleBuyPotion} />}
       {modal === "settings" && (
         <SettingsModal
           onClose={() => setModal(null)}
@@ -600,9 +548,9 @@ export function GameScreen({
           currentLocation={st.location}
           onClose={() => setModal(null)}
           onTravel={(locId) => {
-            const loc = LOCATIONS[locId];
-            if (loc) {
-              teleport(stateRef.current, locId, loc.spawn.x, loc.spawn.y);
+            const locData = LOCATIONS[locId];
+            if (locData) {
+              teleport(stateRef.current, locId, locData.spawn.x, locData.spawn.y);
               setModal(null);
               setTickN((n) => n + 1);
             }

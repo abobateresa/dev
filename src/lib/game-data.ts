@@ -81,11 +81,17 @@ export const CLASS_ABILITIES: Record<ClassId, AbilityDef[]> = {
     { id: "w5", name: "Разрушительный удар", icon: "sword", type: "damage", cooldown: 12, manaCost: 25, power: 2.2, description: "Сокрушительный удар по врагу.", targeted: true },
   ],
   rogue: [
-    { id: "r1", name: "Удар в спину", icon: "dagger", type: "damage", cooldown: 3, manaCost: 8, power: 1.5, description: "Удар в уязвимое место.", targeted: true },
-    { id: "r2", name: "Рывок", icon: "dagger", type: "damage", cooldown: 7, manaCost: 12, power: 1.2, description: "Молниеносный рывок к цели с ударом.", targeted: true },
-    { id: "r3", name: "Ядовитый клинок", icon: "skull", type: "dot", cooldown: 10, manaCost: 16, power: 1.0, description: "Отравляет цель, нанося урон со временем.", targeted: true },
-    { id: "r4", name: "Дымовая завеса", icon: "star", type: "buff_def", cooldown: 20, manaCost: 15, power: 0.25, description: "Повышает уклонение на время.", targeted: false },
-    { id: "r5", name: "Смертельный удар", icon: "dagger", type: "execute", cooldown: 14, manaCost: 26, power: 2.6, description: "Добивающий удар по ослабленной цели.", targeted: true },
+    // === ГЕНЕРАТОРЫ (генерируют комбо-очки) ===
+    { id: "r1", name: "Коварный удар", icon: "dagger", type: "damage", cooldown: 1.5, manaCost: 35, power: 0.65, description: "Генерирует 1 комбо-очко. Базовая атака.", targeted: true },
+    { id: "r2", name: "Удар в спину", icon: "dagger", type: "damage", cooldown: 2.5, manaCost: 40, power: 0.85, description: "Мощный удар со спины. Генерирует 1 комбо-очко.", targeted: true },
+
+    // === ФИНИШЕРЫ (тратят комбо-очки) ===
+    { id: "r3", name: "Отравление", icon: "skull", type: "dot", cooldown: 8, manaCost: 25, power: 1.1, description: "Финишер: усиливает яды и наносит урон.", targeted: true },
+    { id: "r4", name: "Потрошение", icon: "dagger", type: "damage", cooldown: 10, manaCost: 30, power: 1.4, description: "Мощный финишер. Урон растёт с комбо-очками.", targeted: true },
+    { id: "r5", name: "Ядовитый клинок", icon: "skull", type: "dot", cooldown: 12, manaCost: 35, power: 1.6, description: "Сильный DoT-финшер (специализация Отравление).", targeted: true },
+
+    // === Утилити ===
+    { id: "r6", name: "Шаг тени", icon: "star", type: "buff_def", cooldown: 18, manaCost: 30, power: 0.3, description: "Телепортируется за спину цели.", targeted: true },
   ],
   mage: [
     { id: "m1", name: "Огненный шар", icon: "fireball", type: "damage", cooldown: 3, manaCost: 12, power: 1.4, description: "Сгусток пламени по цели.", targeted: true },
