@@ -185,7 +185,7 @@ async function GET(req) {
             });
         });
     }
-    return new Response("Socket.IO server is running", {
+    return new Response(null, {
         status: 200
     });
 }

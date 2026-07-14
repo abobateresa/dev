@@ -312,7 +312,17 @@ async function PATCH(req, ctx) {
         status: 404
     });
     try {
-        const body = await req.json();
+        let body;
+        try {
+            body = await req.json();
+        } catch (parseErr) {
+            console.error("[PATCH] Failed to parse JSON:", parseErr);
+            return Response.json({
+                error: "Invalid JSON body"
+            }, {
+                status: 400
+            });
+        }
         const update = {};
         for (const key of ALLOWED_FIELDS){
             if (key in body) update[key] = body[key];

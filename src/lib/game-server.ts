@@ -1,3 +1,4 @@
+import { createServer } from "http";
 import { Server } from "socket.io";
 import type { Server as HTTPServer } from "http";
 import { LOCATIONS } from "@/components/game/world-data";
@@ -48,11 +49,13 @@ export interface GameRoom {
 
 class GameServer {
   private io: Server;
+  private httpServer: HTTPServer;
   private rooms: Map<string, GameRoom> = new Map();
   private tickInterval: NodeJS.Timeout | null = null;
 
-  constructor(httpServer: HTTPServer) {
-    this.io = new Server(httpServer, {
+  constructor(httpServer?: HTTPServer) {
+    this.httpServer = httpServer ?? createServer();
+    this.io = new Server(this.httpServer, {
       cors: {
         origin: "*",
         methods: ["GET", "POST"],
@@ -62,6 +65,13 @@ class GameServer {
 
     this.setupSocketHandlers();
     this.startGameLoop();
+
+    if (!httpServer) {
+      const port = Number(process.env.MULTIPLAYER_PORT ?? 3101);
+      this.httpServer.listen(port, "0.0.0.0", () => {
+        console.log(`[MP] Socket server listening on port ${port}`);
+      });
+    }
   }
 
   private setupSocketHandlers() {
@@ -79,6 +89,10 @@ class GameServer {
       // Player movement
       socket.on("player_move", ({ x, y }: { x: number; y: number }) => {
         this.handlePlayerMove(socket.id, x, y);
+      });
+
+      socket.on("player_state_update", (playerData: Partial<PlayerState>) => {
+        this.handlePlayerStateUpdate(socket.id, playerData);
       });
 
       // Player attacks mob
@@ -127,7 +141,7 @@ class GameServer {
     const socket = this.io.sockets.sockets.get(socketId);
     if (socket) {
       socket.join(locationId);
-      
+
       socket.emit("initial_state", {
         players: Array.from(room.players.values()),
         mobs: Array.from(room.mobs.values()),
@@ -136,6 +150,34 @@ class GameServer {
 
     // Broadcast new player to others in room
     this.io.to(locationId).emit("player_joined", player);
+  }
+
+  private handlePlayerStateUpdate(socketId: string, playerData: Partial<PlayerState>) {
+    for (const room of this.rooms.values()) {
+      const player = room.players.get(socketId);
+      if (!player) continue;
+
+      const updatedPlayer: PlayerState = {
+        ...player,
+        ...playerData,
+        id: socketId,
+        lastUpdate: Date.now(),
+      };
+
+      room.players.set(socketId, updatedPlayer);
+
+      const hasPositionChange = typeof playerData.x === "number" || typeof playerData.y === "number" || typeof playerData.location === "string";
+      if (hasPositionChange) {
+        this.io.to(room.locationId).emit("player_moved", {
+          id: socketId,
+          x: updatedPlayer.x,
+          y: updatedPlayer.y,
+          location: updatedPlayer.location,
+        });
+      }
+
+      break;
+    }
   }
 
   private createRoom(locationId: string) {

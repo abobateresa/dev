@@ -46,7 +46,13 @@ export async function PATCH(req: Request, ctx: { params: Promise<{ id: string }>
   if (!character) return Response.json({ error: "Персонаж не найден." }, { status: 404 });
 
   try {
-    const body = await req.json();
+    let body: any;
+    try {
+      body = await req.json();
+    } catch (parseErr) {
+      console.error("[PATCH] Failed to parse JSON:", parseErr);
+      return Response.json({ error: "Invalid JSON body" }, { status: 400 });
+    }
     const update: Record<string, unknown> = {};
     for (const key of ALLOWED_FIELDS) {
       if (key in body) update[key] = body[key];

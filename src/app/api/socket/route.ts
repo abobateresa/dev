@@ -1,47 +1,21 @@
-import { Server as NetServer } from "http";
-import { NextRequest } from "next/server";
-import { Server as SocketIOServer } from "socket.io";
+import { NextResponse } from "next/server";
+import { getGameServer } from "@/lib/game-server";
 
 export const dynamic = "force-dynamic";
+export const runtime = "nodejs";
 
-let io: SocketIOServer | undefined;
+export async function GET() {
+  try {
+    const gameServer = getGameServer();
 
-export async function GET(req: NextRequest) {
-  // @ts-ignore
-  const server = (req as any).socket?.server as NetServer;
+    if (!gameServer) {
+      console.error("[Socket.IO] Failed to initialize game server");
+      return NextResponse.json({ error: "Failed to initialize server" }, { status: 500 });
+    }
 
-  if (server && !io) {
-    console.log("[Socket.IO] Initializing server...");
-
-    io = new SocketIOServer(server, {
-      path: "/api/socket",
-      cors: {
-        origin: "*",
-        methods: ["GET", "POST"],
-      },
-    });
-
-    io.on("connection", (socket) => {
-      console.log(`[MP] Player connected: ${socket.id}`);
-
-      socket.on("join_location", ({ locationId, playerData }) => {
-        socket.join(locationId);
-        socket.emit("initial_state", { players: [], mobs: [] });
-      });
-
-      socket.on("player_move", (data) => {
-        socket.broadcast.emit("player_moved", data);
-      });
-
-      socket.on("attack_mob", (data) => {
-        socket.broadcast.emit("mob_updated", data);
-      });
-
-      socket.on("disconnect", () => {
-        console.log(`[MP] Player disconnected: ${socket.id}`);
-      });
-    });
+    return NextResponse.json({ ok: true });
+  } catch (err) {
+    console.error("[Socket.IO] Error in GET handler:", err);
+    return NextResponse.json({ error: "Internal server error" }, { status: 500 });
   }
-
-  return new Response("Socket.IO server is running", { status: 200 });
 }

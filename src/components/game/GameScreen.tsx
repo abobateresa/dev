@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Image from "next/image";
 import type { CharacterRow } from "@/components/game/types";
 import { LOCATIONS } from "@/components/game/world-data";
@@ -71,24 +71,42 @@ export function GameScreen({
   const abilities = abilitiesFor(character.className);
 
   // MULTIPLAYER
+  const st = stateRef.current;
+  const loc = LOCATIONS[st.location] ?? LOCATIONS.city;
+  const stats = getStats(st, character.className);
+  const camX = clampCam(st.x, viewport.w, loc.width);
+  const camY = clampCam(st.y, viewport.h, loc.height);
+  const translateX = viewport.w / 2 - camX;
+  const translateY = viewport.h / 2 - camY;
+  const isRanged = attackRangeFor(character.className) > 150;
+  const expNeeded = expForLevel(st.level);
+  const isDark = character.faction === "dark";
+
+  const multiplayerPlayerData = useMemo(() => ({
+    name: character.name,
+    className: character.className,
+    level: st.level,
+    hp: Math.round(st.hp),
+    maxHp: stats.maxHp,
+    mp: Math.round(st.mp),
+    maxMp: stats.maxMp,
+    x: st.x,
+    y: st.y,
+    location: st.location,
+    facing: st.facing,
+  }), [character.name, character.className, st.level, st.hp, stats.maxHp, st.mp, stats.maxMp, st.x, st.y, st.location, st.facing]);
+
   const { 
     players: remotePlayers, 
     mobs: remoteMobs, 
     connected,
+    playerId,
     sendMove,
     attackMob 
-  } = useMultiplayer(character.location, {
-    name: character.name,
-    className: character.className,
-    level: character.level,
-    hp: character.hp,
-    maxHp: 100,
-    mp: character.mp,
-    maxMp: 50,
-    facing: 1,
-  });
+  } = useMultiplayer(character.location, multiplayerPlayerData);
 
   const displayMobs = connected && remoteMobs.length > 0 ? remoteMobs : Object.values(stateRef.current.mobs);
+  const visibleRemotePlayers = remotePlayers.filter((player) => player.id !== playerId);
 
   useEffect(() => {
     function onResize() {
@@ -108,12 +126,16 @@ export function GameScreen({
   }, []);
 
   const saveCharacter = useCallback((patch: Record<string, unknown>) => {
+    if (!character?.id) {
+      console.warn("[GS] Cannot save character: missing character ID");
+      return;
+    }
     fetch(`/api/characters/${character.id}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       credentials: "include",
       body: JSON.stringify(patch),
-    }).catch(() => {});
+    }).catch((err) => console.error("[GS] Save failed:", err));
   }, [character.id]);
 
   // game loop
@@ -286,17 +308,6 @@ export function GameScreen({
 
   function handleLeftClickGround() {}
 
-  const st = stateRef.current;
-  const loc = LOCATIONS[st.location] ?? LOCATIONS.city;
-  const stats = getStats(st, character.className);
-  const camX = clampCam(st.x, viewport.w, loc.width);
-  const camY = clampCam(st.y, viewport.h, loc.height);
-  const translateX = viewport.w / 2 - camX;
-  const translateY = viewport.h / 2 - camY;
-  const isRanged = attackRangeFor(character.className) > 150;
-  const expNeeded = expForLevel(st.level);
-  const isDark = character.faction === "dark";
-
   return (
     <div className="fixed inset-0 overflow-hidden bg-black text-white select-none">
       <div
@@ -311,7 +322,8 @@ export function GameScreen({
             width: loc.width,
             height: loc.height,
             transform: `translate3d(${translateX}px, ${translateY}px, 0)`,
-            backgroundImage: `url(${loc.background})`,
+            backgroundColor: loc.backgroundColor || "#1a1410",
+            backgroundImage: loc.backgroundPattern,
             backgroundSize: "512px 512px",
             backgroundRepeat: "repeat",
           }}
@@ -326,7 +338,7 @@ export function GameScreen({
           {/* trees, buildings, portals — оставлены как есть */}
 
           {/* === ДРУГИЕ ИГРОКИ === */}
-          {remotePlayers.map((player) => (
+          {visibleRemotePlayers.map((player) => (
             <div
               key={player.id}
               className="absolute -translate-x-1/2 -translate-y-[88%]"

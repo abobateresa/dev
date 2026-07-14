@@ -1,0 +1,13 @@
+{
+  "/_global-error/page": "app/_global-error/page.js",
+  "/_not-found/page": "app/_not-found/page.js",
+  "/api/auth/login/route": "app/api/auth/login/route.js",
+  "/api/auth/logout/route": "app/api/auth/logout/route.js",
+  "/api/auth/me/route": "app/api/auth/me/route.js",
+  "/api/auth/register/route": "app/api/auth/register/route.js",
+  "/api/characters/[id]/route": "app/api/characters/[id]/route.js",
+  "/api/characters/route": "app/api/characters/route.js",
+  "/api/health/route": "app/api/health/route.js",
+  "/api/socket/route": "app/api/socket/route.js",
+  "/page": "app/page.js"
+}
