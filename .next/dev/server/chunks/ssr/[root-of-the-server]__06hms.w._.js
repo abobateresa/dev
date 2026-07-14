@@ -7865,26 +7865,35 @@ function useMultiplayer(locationId, playerData) {
     const [connected, setConnected] = (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$server$2f$route$2d$modules$2f$app$2d$page$2f$vendored$2f$ssr$2f$react$2e$js__$5b$app$2d$ssr$5d$__$28$ecmascript$29$__["useState"])(false);
     const socketRef = (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$server$2f$route$2d$modules$2f$app$2d$page$2f$vendored$2f$ssr$2f$react$2e$js__$5b$app$2d$ssr$5d$__$28$ecmascript$29$__["useRef"])(null);
     (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$server$2f$route$2d$modules$2f$app$2d$page$2f$vendored$2f$ssr$2f$react$2e$js__$5b$app$2d$ssr$5d$__$28$ecmascript$29$__["useEffect"])(()=>{
-        // Connect to Socket.IO
         const socket = (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$socket$2e$io$2d$client$2f$build$2f$esm$2d$debug$2f$index$2e$js__$5b$app$2d$ssr$5d$__$28$ecmascript$29$__$3c$locals$3e$__["io"])({
             path: "/api/socket",
             transports: [
+                "polling",
                 "websocket"
-            ]
+            ],
+            reconnection: true,
+            reconnectionAttempts: 10,
+            timeout: 20000
         });
         socketRef.current = socket;
         socket.on("connect", ()=>{
-            console.log("[MP] Connected to server");
+            console.log("[MP] ✅ Connected");
             setConnected(true);
-            // Join location
             socket.emit("join_location", {
                 locationId,
                 playerData
             });
         });
+        socket.on("connect_error", (err)=>{
+            console.error("[MP] Connect error:", err.message);
+        });
+        socket.on("disconnect", (reason)=>{
+            console.log("[MP] Disconnected:", reason);
+            setConnected(false);
+        });
         socket.on("initial_state", (data)=>{
-            setPlayers(data.players);
-            setMobs(data.mobs);
+            setPlayers(data.players || []);
+            setMobs(data.mobs || []);
         });
         socket.on("player_joined", (player)=>{
             setPlayers((prev)=>[
@@ -7892,8 +7901,8 @@ function useMultiplayer(locationId, playerData) {
                     player
                 ]);
         });
-        socket.on("player_left", (playerId)=>{
-            setPlayers((prev)=>prev.filter((p)=>p.id !== playerId));
+        socket.on("player_left", (id)=>{
+            setPlayers((prev)=>prev.filter((p)=>p.id !== id));
         });
         socket.on("player_moved", (data)=>{
             setPlayers((prev)=>prev.map((p)=>p.id === data.id ? {
@@ -7902,50 +7911,24 @@ function useMultiplayer(locationId, playerData) {
                         y: data.y
                     } : p));
         });
-        socket.on("mob_updated", (data)=>{
-            setMobs((prev)=>prev.map((m)=>m.spawnId === data.spawnId ? {
-                        ...m,
-                        ...data
-                    } : m));
-        });
-        socket.on("mob_moved", (data)=>{
-            setMobs((prev)=>prev.map((m)=>m.spawnId === data.spawnId ? {
-                        ...m,
-                        x: data.x,
-                        y: data.y
-                    } : m));
-        });
         socket.on("full_state_update", (data)=>{
-            setPlayers(data.players);
-            setMobs(data.mobs);
+            setPlayers(data.players || []);
+            setMobs(data.mobs || []);
         });
-        socket.on("damage_number", (data)=>{
-            // Can be used to show floating damage numbers
-            console.log("[MP] Damage:", data);
-        });
-        return ()=>{
-            socket.disconnect();
-            setConnected(false);
-        };
+        return ()=>socket.disconnect();
     }, [
         locationId
     ]);
-    // Send movement
     const sendMove = (x, y)=>{
-        if (socketRef.current?.connected) {
-            socketRef.current.emit("player_move", {
-                x,
-                y
-            });
-        }
+        socketRef.current?.emit("player_move", {
+            x,
+            y
+        });
     };
-    // Attack mob
     const attackMob = (mobId)=>{
-        if (socketRef.current?.connected) {
-            socketRef.current.emit("attack_mob", {
-                mobId
-            });
-        }
+        socketRef.current?.emit("attack_mob", {
+            mobId
+        });
     };
     return {
         players,
@@ -8017,7 +8000,7 @@ function GameScreen({ character, onExitToSelect, onLogout }) {
     const settingsRef = (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$server$2f$route$2d$modules$2f$app$2d$page$2f$vendored$2f$ssr$2f$react$2e$js__$5b$app$2d$ssr$5d$__$28$ecmascript$29$__["useRef"])(settings);
     settingsRef.current = settings;
     const abilities = (0, __TURBOPACK__imported__module__$5b$project$5d2f$src$2f$components$2f$game$2f$engine$2e$ts__$5b$app$2d$ssr$5d$__$28$ecmascript$29$__["abilitiesFor"])(character.className);
-    // ==================== MULTIPLAYER ====================
+    // MULTIPLAYER
     const { players: remotePlayers, mobs: remoteMobs, connected, sendMove, attackMob } = (0, __TURBOPACK__imported__module__$5b$project$5d2f$src$2f$hooks$2f$useMultiplayer$2e$ts__$5b$app$2d$ssr$5d$__$28$ecmascript$29$__["useMultiplayer"])(character.location, {
         name: character.name,
         className: character.className,
@@ -8028,7 +8011,7 @@ function GameScreen({ character, onExitToSelect, onLogout }) {
         maxMp: 50,
         facing: 1
     });
-    // viewport size tracking
+    const displayMobs = connected && remoteMobs.length > 0 ? remoteMobs : Object.values(stateRef.current.mobs);
     (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$server$2f$route$2d$modules$2f$app$2d$page$2f$vendored$2f$ssr$2f$react$2e$js__$5b$app$2d$ssr$5d$__$28$ecmascript$29$__["useEffect"])(()=>{
         function onResize() {
             setViewport({
@@ -8040,7 +8023,6 @@ function GameScreen({ character, onExitToSelect, onLogout }) {
         window.addEventListener("resize", onResize);
         return ()=>window.removeEventListener("resize", onResize);
     }, []);
-    // fullscreen tracking
     (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$server$2f$route$2d$modules$2f$app$2d$page$2f$vendored$2f$ssr$2f$react$2e$js__$5b$app$2d$ssr$5d$__$28$ecmascript$29$__["useEffect"])(()=>{
         function onFsChange() {
             setIsFullscreen(Boolean(document.fullscreenElement));
@@ -8110,7 +8092,7 @@ function GameScreen({ character, onExitToSelect, onLogout }) {
             cancelAnimationFrame(raf);
         };
     }, []);
-    // keyboard shortcuts
+    // keyboard
     (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$server$2f$route$2d$modules$2f$app$2d$page$2f$vendored$2f$ssr$2f$react$2e$js__$5b$app$2d$ssr$5d$__$28$ecmascript$29$__["useEffect"])(()=>{
         function onKey(e) {
             if (modal) {
@@ -8191,13 +8173,12 @@ function GameScreen({ character, onExitToSelect, onLogout }) {
         (0, __TURBOPACK__imported__module__$5b$project$5d2f$src$2f$components$2f$game$2f$engine$2e$ts__$5b$app$2d$ssr$5d$__$28$ecmascript$29$__["selectTarget"])(stateRef.current, mobId);
         sound.playClick();
         setTickN((n)=>n + 1);
-        attackMob(mobId);
+        if (connected) attackMob(mobId);
     }
     function handlePortalClick(px, py, toLocation, toX, toY) {
         (0, __TURBOPACK__imported__module__$5b$project$5d2f$src$2f$components$2f$game$2f$engine$2e$ts__$5b$app$2d$ssr$5d$__$28$ecmascript$29$__["moveToPortal"])(stateRef.current, px, py, toLocation, toX, toY);
         setTickN((n)=>n + 1);
     }
-    // ПКМ — движение + отправка в мультиплеер
     function handleRightClick(e) {
         e.preventDefault();
         const st = stateRef.current;
@@ -8214,12 +8195,9 @@ function GameScreen({ character, onExitToSelect, onLogout }) {
         worldY = Math.max(10, Math.min(loc.height - 10, worldY));
         (0, __TURBOPACK__imported__module__$5b$project$5d2f$src$2f$components$2f$game$2f$engine$2e$ts__$5b$app$2d$ssr$5d$__$28$ecmascript$29$__["issueMoveCommand"])(st, worldX, worldY);
         setTickN((n)=>n + 1);
-        // Отправляем движение на сервер
-        sendMove(worldX, worldY);
+        if (connected) sendMove(worldX, worldY);
     }
-    function handleLeftClickGround() {
-    // intentionally empty
-    }
+    function handleLeftClickGround() {}
     const st = stateRef.current;
     const loc = __TURBOPACK__imported__module__$5b$project$5d2f$src$2f$components$2f$game$2f$world$2d$data$2e$ts__$5b$app$2d$ssr$5d$__$28$ecmascript$29$__["LOCATIONS"][st.location] ?? __TURBOPACK__imported__module__$5b$project$5d2f$src$2f$components$2f$game$2f$world$2d$data$2e$ts__$5b$app$2d$ssr$5d$__$28$ecmascript$29$__["LOCATIONS"].city;
     const stats = (0, __TURBOPACK__imported__module__$5b$project$5d2f$src$2f$components$2f$game$2f$engine$2e$ts__$5b$app$2d$ssr$5d$__$28$ecmascript$29$__["getStats"])(st, character.className);
@@ -8257,104 +8235,10 @@ function GameScreen({ character, onExitToSelect, onLogout }) {
                             }
                         }, void 0, false, {
                             fileName: "[project]/src/components/game/GameScreen.tsx",
-                            lineNumber: 324,
+                            lineNumber: 320,
                             columnNumber: 13
                         }, this),
-                        loc.trees.map((t)=>/*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$server$2f$route$2d$modules$2f$app$2d$page$2f$vendored$2f$ssr$2f$react$2d$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$ssr$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
-                                className: "absolute -translate-x-1/2 -translate-y-[85%]",
-                                style: {
-                                    left: t.x,
-                                    top: t.y,
-                                    width: 90 * t.scale,
-                                    height: 110 * t.scale
-                                },
-                                children: /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$server$2f$route$2d$modules$2f$app$2d$page$2f$vendored$2f$ssr$2f$react$2d$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$ssr$5d$__$28$ecmascript$29$__["jsxDEV"])(__TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$image$2e$js__$5b$app$2d$ssr$5d$__$28$ecmascript$29$__["default"], {
-                                    src: "/images/tree.png",
-                                    alt: "",
-                                    fill: true,
-                                    sizes: "120px",
-                                    className: "object-contain drop-shadow-[0_10px_6px_rgba(0,0,0,0.5)]"
-                                }, void 0, false, {
-                                    fileName: "[project]/src/components/game/GameScreen.tsx",
-                                    lineNumber: 337,
-                                    columnNumber: 15
-                                }, this)
-                            }, t.id, false, {
-                                fileName: "[project]/src/components/game/GameScreen.tsx",
-                                lineNumber: 332,
-                                columnNumber: 13
-                            }, this)),
-                        loc.buildings.map((b)=>/*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$server$2f$route$2d$modules$2f$app$2d$page$2f$vendored$2f$ssr$2f$react$2d$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$ssr$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
-                                className: "absolute",
-                                style: {
-                                    left: b.x,
-                                    top: b.y,
-                                    width: b.w,
-                                    height: b.h
-                                },
-                                children: [
-                                    /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$server$2f$route$2d$modules$2f$app$2d$page$2f$vendored$2f$ssr$2f$react$2d$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$ssr$5d$__$28$ecmascript$29$__["jsxDEV"])(__TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$image$2e$js__$5b$app$2d$ssr$5d$__$28$ecmascript$29$__["default"], {
-                                        src: "/images/house.png",
-                                        alt: "",
-                                        fill: true,
-                                        sizes: "300px",
-                                        className: "object-fill drop-shadow-[0_14px_10px_rgba(0,0,0,0.6)]"
-                                    }, void 0, false, {
-                                        fileName: "[project]/src/components/game/GameScreen.tsx",
-                                        lineNumber: 344,
-                                        columnNumber: 15
-                                    }, this),
-                                    b.label && /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$server$2f$route$2d$modules$2f$app$2d$page$2f$vendored$2f$ssr$2f$react$2d$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$ssr$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
-                                        className: "absolute -top-6 left-1/2 -translate-x-1/2 whitespace-nowrap rounded bg-black/60 px-2 py-0.5 text-[11px] text-sky-300",
-                                        children: [
-                                            "<",
-                                            b.label,
-                                            ">"
-                                        ]
-                                    }, void 0, true, {
-                                        fileName: "[project]/src/components/game/GameScreen.tsx",
-                                        lineNumber: 346,
-                                        columnNumber: 17
-                                    }, this)
-                                ]
-                            }, b.id, true, {
-                                fileName: "[project]/src/components/game/GameScreen.tsx",
-                                lineNumber: 343,
-                                columnNumber: 13
-                            }, this)),
-                        loc.portals.map((p, i)=>/*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$server$2f$route$2d$modules$2f$app$2d$page$2f$vendored$2f$ssr$2f$react$2d$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$ssr$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
-                                onClick: (e)=>{
-                                    e.stopPropagation();
-                                    handlePortalClick(p.x, p.y, p.toLocation, p.toX, p.toY);
-                                },
-                                className: "absolute -translate-x-1/2 -translate-y-1/2 cursor-pointer",
-                                style: {
-                                    left: p.x,
-                                    top: p.y
-                                },
-                                children: [
-                                    /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$server$2f$route$2d$modules$2f$app$2d$page$2f$vendored$2f$ssr$2f$react$2d$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$ssr$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
-                                        className: "portal-swirl h-16 w-16 rounded-full"
-                                    }, void 0, false, {
-                                        fileName: "[project]/src/components/game/GameScreen.tsx",
-                                        lineNumber: 364,
-                                        columnNumber: 15
-                                    }, this),
-                                    /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$server$2f$route$2d$modules$2f$app$2d$page$2f$vendored$2f$ssr$2f$react$2d$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$ssr$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
-                                        className: "absolute -bottom-6 left-1/2 -translate-x-1/2 whitespace-nowrap rounded bg-black/70 px-2 py-0.5 text-[11px] text-purple-300",
-                                        children: p.label
-                                    }, void 0, false, {
-                                        fileName: "[project]/src/components/game/GameScreen.tsx",
-                                        lineNumber: 365,
-                                        columnNumber: 15
-                                    }, this)
-                                ]
-                            }, i, true, {
-                                fileName: "[project]/src/components/game/GameScreen.tsx",
-                                lineNumber: 355,
-                                columnNumber: 13
-                            }, this)),
-                        remotePlayers.filter((p)=>p.id !== character.id).map((player)=>/*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$server$2f$route$2d$modules$2f$app$2d$page$2f$vendored$2f$ssr$2f$react$2d$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$ssr$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
+                        remotePlayers.map((player)=>/*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$server$2f$route$2d$modules$2f$app$2d$page$2f$vendored$2f$ssr$2f$react$2d$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$ssr$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
                                 className: "absolute -translate-x-1/2 -translate-y-[88%]",
                                 style: {
                                     left: player.x,
@@ -8373,8 +8257,8 @@ function GameScreen({ character, onExitToSelect, onLogout }) {
                                         ]
                                     }, void 0, true, {
                                         fileName: "[project]/src/components/game/GameScreen.tsx",
-                                        lineNumber: 381,
-                                        columnNumber: 19
+                                        lineNumber: 336,
+                                        columnNumber: 17
                                     }, this),
                                     /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$server$2f$route$2d$modules$2f$app$2d$page$2f$vendored$2f$ssr$2f$react$2d$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$ssr$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
                                         className: "absolute -top-1 left-1/2 h-1.5 w-14 -translate-x-1/2 overflow-hidden rounded-full border border-black/70 bg-black/60",
@@ -8385,13 +8269,13 @@ function GameScreen({ character, onExitToSelect, onLogout }) {
                                             }
                                         }, void 0, false, {
                                             fileName: "[project]/src/components/game/GameScreen.tsx",
-                                            lineNumber: 386,
-                                            columnNumber: 19
+                                            lineNumber: 341,
+                                            columnNumber: 17
                                         }, this)
                                     }, void 0, false, {
                                         fileName: "[project]/src/components/game/GameScreen.tsx",
-                                        lineNumber: 385,
-                                        columnNumber: 17
+                                        lineNumber: 340,
+                                        columnNumber: 15
                                     }, this),
                                     /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$server$2f$route$2d$modules$2f$app$2d$page$2f$vendored$2f$ssr$2f$react$2d$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$ssr$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
                                         className: "relative h-full w-full",
@@ -8403,21 +8287,21 @@ function GameScreen({ character, onExitToSelect, onLogout }) {
                                             className: "object-contain drop-shadow-[0_10px_8px_rgba(0,0,0,0.6)]"
                                         }, void 0, false, {
                                             fileName: "[project]/src/components/game/GameScreen.tsx",
-                                            lineNumber: 389,
-                                            columnNumber: 19
+                                            lineNumber: 344,
+                                            columnNumber: 17
                                         }, this)
                                     }, void 0, false, {
                                         fileName: "[project]/src/components/game/GameScreen.tsx",
-                                        lineNumber: 388,
-                                        columnNumber: 17
+                                        lineNumber: 343,
+                                        columnNumber: 15
                                     }, this)
                                 ]
                             }, player.id, true, {
                                 fileName: "[project]/src/components/game/GameScreen.tsx",
-                                lineNumber: 375,
-                                columnNumber: 15
+                                lineNumber: 330,
+                                columnNumber: 13
                             }, this)),
-                        remoteMobs.map((m)=>{
+                        displayMobs.map((m)=>{
                             if (!m.alive) return null;
                             const hpPct = m.hp / m.maxHp * 100;
                             return /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$server$2f$route$2d$modules$2f$app$2d$page$2f$vendored$2f$ssr$2f$react$2d$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$ssr$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
@@ -8443,12 +8327,12 @@ function GameScreen({ character, onExitToSelect, onLogout }) {
                                             className: "object-contain drop-shadow-[0_8px_6px_rgba(0,0,0,0.6)]"
                                         }, void 0, false, {
                                             fileName: "[project]/src/components/game/GameScreen.tsx",
-                                            lineNumber: 409,
+                                            lineNumber: 364,
                                             columnNumber: 19
                                         }, this)
                                     }, void 0, false, {
                                         fileName: "[project]/src/components/game/GameScreen.tsx",
-                                        lineNumber: 408,
+                                        lineNumber: 363,
                                         columnNumber: 17
                                     }, this),
                                     /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$server$2f$route$2d$modules$2f$app$2d$page$2f$vendored$2f$ssr$2f$react$2d$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$ssr$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
@@ -8461,7 +8345,7 @@ function GameScreen({ character, onExitToSelect, onLogout }) {
                                         ]
                                     }, void 0, true, {
                                         fileName: "[project]/src/components/game/GameScreen.tsx",
-                                        lineNumber: 411,
+                                        lineNumber: 366,
                                         columnNumber: 17
                                     }, this),
                                     /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$server$2f$route$2d$modules$2f$app$2d$page$2f$vendored$2f$ssr$2f$react$2d$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$ssr$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
@@ -8473,18 +8357,18 @@ function GameScreen({ character, onExitToSelect, onLogout }) {
                                             }
                                         }, void 0, false, {
                                             fileName: "[project]/src/components/game/GameScreen.tsx",
-                                            lineNumber: 415,
+                                            lineNumber: 370,
                                             columnNumber: 19
                                         }, this)
                                     }, void 0, false, {
                                         fileName: "[project]/src/components/game/GameScreen.tsx",
-                                        lineNumber: 414,
+                                        lineNumber: 369,
                                         columnNumber: 17
                                     }, this)
                                 ]
                             }, m.spawnId, true, {
                                 fileName: "[project]/src/components/game/GameScreen.tsx",
-                                lineNumber: 399,
+                                lineNumber: 354,
                                 columnNumber: 15
                             }, this);
                         }),
@@ -8507,7 +8391,7 @@ function GameScreen({ character, onExitToSelect, onLogout }) {
                                     ]
                                 }, void 0, true, {
                                     fileName: "[project]/src/components/game/GameScreen.tsx",
-                                    lineNumber: 427,
+                                    lineNumber: 382,
                                     columnNumber: 15
                                 }, this),
                                 /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$server$2f$route$2d$modules$2f$app$2d$page$2f$vendored$2f$ssr$2f$react$2d$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$ssr$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
@@ -8519,12 +8403,12 @@ function GameScreen({ character, onExitToSelect, onLogout }) {
                                         }
                                     }, void 0, false, {
                                         fileName: "[project]/src/components/game/GameScreen.tsx",
-                                        lineNumber: 432,
+                                        lineNumber: 387,
                                         columnNumber: 15
                                     }, this)
                                 }, void 0, false, {
                                     fileName: "[project]/src/components/game/GameScreen.tsx",
-                                    lineNumber: 431,
+                                    lineNumber: 386,
                                     columnNumber: 13
                                 }, this),
                                 /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$server$2f$route$2d$modules$2f$app$2d$page$2f$vendored$2f$ssr$2f$react$2d$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$ssr$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
@@ -8540,36 +8424,36 @@ function GameScreen({ character, onExitToSelect, onLogout }) {
                                         className: "object-contain drop-shadow-[0_10px_8px_rgba(0,0,0,0.6)]"
                                     }, void 0, false, {
                                         fileName: "[project]/src/components/game/GameScreen.tsx",
-                                        lineNumber: 435,
+                                        lineNumber: 390,
                                         columnNumber: 15
                                     }, this)
                                 }, void 0, false, {
                                     fileName: "[project]/src/components/game/GameScreen.tsx",
-                                    lineNumber: 434,
+                                    lineNumber: 389,
                                     columnNumber: 13
                                 }, this),
                                 isRanged && /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$server$2f$route$2d$modules$2f$app$2d$page$2f$vendored$2f$ssr$2f$react$2d$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$ssr$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
                                     className: "absolute -bottom-1 left-1/2 h-1 w-1 -translate-x-1/2"
                                 }, void 0, false, {
                                     fileName: "[project]/src/components/game/GameScreen.tsx",
-                                    lineNumber: 437,
+                                    lineNumber: 392,
                                     columnNumber: 26
                                 }, this)
                             ]
                         }, void 0, true, {
                             fileName: "[project]/src/components/game/GameScreen.tsx",
-                            lineNumber: 422,
+                            lineNumber: 377,
                             columnNumber: 11
                         }, this)
                     ]
                 }, void 0, true, {
                     fileName: "[project]/src/components/game/GameScreen.tsx",
-                    lineNumber: 312,
+                    lineNumber: 308,
                     columnNumber: 9
                 }, this)
             }, void 0, false, {
                 fileName: "[project]/src/components/game/GameScreen.tsx",
-                lineNumber: 306,
+                lineNumber: 302,
                 columnNumber: 7
             }, this),
             st.message && /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$server$2f$route$2d$modules$2f$app$2d$page$2f$vendored$2f$ssr$2f$react$2d$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$ssr$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
@@ -8577,7 +8461,7 @@ function GameScreen({ character, onExitToSelect, onLogout }) {
                 children: st.message
             }, void 0, false, {
                 fileName: "[project]/src/components/game/GameScreen.tsx",
-                lineNumber: 443,
+                lineNumber: 398,
                 columnNumber: 9
             }, this),
             /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$server$2f$route$2d$modules$2f$app$2d$page$2f$vendored$2f$ssr$2f$react$2d$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$ssr$5d$__$28$ecmascript$29$__["jsxDEV"])(__TURBOPACK__imported__module__$5b$project$5d2f$src$2f$components$2f$game$2f$TopBar$2e$tsx__$5b$app$2d$ssr$5d$__$28$ecmascript$29$__["TopBar"], {
@@ -8603,7 +8487,7 @@ function GameScreen({ character, onExitToSelect, onLogout }) {
                         x: p.x,
                         y: p.y
                     })),
-                mobDots: Object.values(st.mobs).map((m)=>({
+                mobDots: displayMobs.map((m)=>({
                         x: m.x,
                         y: m.y,
                         alive: m.alive
@@ -8614,7 +8498,7 @@ function GameScreen({ character, onExitToSelect, onLogout }) {
                 onLogout: onLogout
             }, void 0, false, {
                 fileName: "[project]/src/components/game/GameScreen.tsx",
-                lineNumber: 448,
+                lineNumber: 403,
                 columnNumber: 7
             }, this),
             character.className === "rogue" && /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$server$2f$route$2d$modules$2f$app$2d$page$2f$vendored$2f$ssr$2f$react$2d$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$ssr$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
@@ -8625,12 +8509,12 @@ function GameScreen({ character, onExitToSelect, onLogout }) {
                     comboPoints: st.comboPoints
                 }, void 0, false, {
                     fileName: "[project]/src/components/game/GameScreen.tsx",
-                    lineNumber: 471,
+                    lineNumber: 426,
                     columnNumber: 11
                 }, this)
             }, void 0, false, {
                 fileName: "[project]/src/components/game/GameScreen.tsx",
-                lineNumber: 470,
+                lineNumber: 425,
                 columnNumber: 9
             }, this),
             /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$server$2f$route$2d$modules$2f$app$2d$page$2f$vendored$2f$ssr$2f$react$2d$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$ssr$5d$__$28$ecmascript$29$__["jsxDEV"])(__TURBOPACK__imported__module__$5b$project$5d2f$src$2f$components$2f$game$2f$BottomBar$2e$tsx__$5b$app$2d$ssr$5d$__$28$ecmascript$29$__["BottomBar"], {
@@ -8654,7 +8538,7 @@ function GameScreen({ character, onExitToSelect, onLogout }) {
                 onUsePotion: handleUsePotion
             }, void 0, false, {
                 fileName: "[project]/src/components/game/GameScreen.tsx",
-                lineNumber: 479,
+                lineNumber: 434,
                 columnNumber: 7
             }, this),
             modal === "character" && /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$server$2f$route$2d$modules$2f$app$2d$page$2f$vendored$2f$ssr$2f$react$2d$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$ssr$5d$__$28$ecmascript$29$__["jsxDEV"])(__TURBOPACK__imported__module__$5b$project$5d2f$src$2f$components$2f$game$2f$Modals$2e$tsx__$5b$app$2d$ssr$5d$__$28$ecmascript$29$__["CharacterModal"], {
@@ -8669,8 +8553,8 @@ function GameScreen({ character, onExitToSelect, onLogout }) {
                 stats: stats
             }, void 0, false, {
                 fileName: "[project]/src/components/game/GameScreen.tsx",
-                lineNumber: 502,
-                columnNumber: 9
+                lineNumber: 456,
+                columnNumber: 33
             }, this),
             modal === "talents" && /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$server$2f$route$2d$modules$2f$app$2d$page$2f$vendored$2f$ssr$2f$react$2d$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$ssr$5d$__$28$ecmascript$29$__["jsxDEV"])(__TURBOPACK__imported__module__$5b$project$5d2f$src$2f$components$2f$game$2f$Modals$2e$tsx__$5b$app$2d$ssr$5d$__$28$ecmascript$29$__["TalentsModal"], {
                 onClose: ()=>setModal(null),
@@ -8679,7 +8563,7 @@ function GameScreen({ character, onExitToSelect, onLogout }) {
                 onSpend: handleSpendTalent
             }, void 0, false, {
                 fileName: "[project]/src/components/game/GameScreen.tsx",
-                lineNumber: 514,
+                lineNumber: 457,
                 columnNumber: 31
             }, this),
             modal === "forge" && /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$server$2f$route$2d$modules$2f$app$2d$page$2f$vendored$2f$ssr$2f$react$2d$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$ssr$5d$__$28$ecmascript$29$__["jsxDEV"])(__TURBOPACK__imported__module__$5b$project$5d2f$src$2f$components$2f$game$2f$Modals$2e$tsx__$5b$app$2d$ssr$5d$__$28$ecmascript$29$__["ForgeModal"], {
@@ -8690,7 +8574,7 @@ function GameScreen({ character, onExitToSelect, onLogout }) {
                 onBuyPotion: handleBuyPotion
             }, void 0, false, {
                 fileName: "[project]/src/components/game/GameScreen.tsx",
-                lineNumber: 515,
+                lineNumber: 458,
                 columnNumber: 29
             }, this),
             modal === "settings" && /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$server$2f$route$2d$modules$2f$app$2d$page$2f$vendored$2f$ssr$2f$react$2d$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$ssr$5d$__$28$ecmascript$29$__["jsxDEV"])(__TURBOPACK__imported__module__$5b$project$5d2f$src$2f$components$2f$game$2f$Modals$2e$tsx__$5b$app$2d$ssr$5d$__$28$ecmascript$29$__["SettingsModal"], {
@@ -8720,14 +8604,14 @@ function GameScreen({ character, onExitToSelect, onLogout }) {
                 }
             }, void 0, false, {
                 fileName: "[project]/src/components/game/GameScreen.tsx",
-                lineNumber: 517,
-                columnNumber: 9
+                lineNumber: 459,
+                columnNumber: 32
             }, this),
             modal === "help" && /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$server$2f$route$2d$modules$2f$app$2d$page$2f$vendored$2f$ssr$2f$react$2d$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$ssr$5d$__$28$ecmascript$29$__["jsxDEV"])(__TURBOPACK__imported__module__$5b$project$5d2f$src$2f$components$2f$game$2f$Modals$2e$tsx__$5b$app$2d$ssr$5d$__$28$ecmascript$29$__["HelpModal"], {
                 onClose: ()=>setModal(null)
             }, void 0, false, {
                 fileName: "[project]/src/components/game/GameScreen.tsx",
-                lineNumber: 544,
+                lineNumber: 460,
                 columnNumber: 28
             }, this),
             modal === "worldmap" && /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$server$2f$route$2d$modules$2f$app$2d$page$2f$vendored$2f$ssr$2f$react$2d$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$ssr$5d$__$28$ecmascript$29$__["jsxDEV"])(__TURBOPACK__imported__module__$5b$project$5d2f$src$2f$components$2f$game$2f$WorldMap$2e$tsx__$5b$app$2d$ssr$5d$__$28$ecmascript$29$__["WorldMap"], {
@@ -8743,13 +8627,13 @@ function GameScreen({ character, onExitToSelect, onLogout }) {
                 }
             }, void 0, false, {
                 fileName: "[project]/src/components/game/GameScreen.tsx",
-                lineNumber: 547,
-                columnNumber: 9
+                lineNumber: 461,
+                columnNumber: 32
             }, this)
         ]
     }, void 0, true, {
         fileName: "[project]/src/components/game/GameScreen.tsx",
-        lineNumber: 305,
+        lineNumber: 301,
         columnNumber: 5
     }, this);
 }

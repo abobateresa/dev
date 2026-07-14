@@ -1,0 +1,6 @@
+{
+  "version": 3,
+  "sources": [],
+  "sections": [
+    {"offset": {"line": 40, "column": 0}, "map": {"version":3,"sources":["file:///C:/Users/user/Documents/Light%26Darkness/src/app/api/socket/route.ts"],"sourcesContent":["import { NextRequest } from \"next/server\";\r\nimport { getGameServer } from \"@/lib/game-server\";\r\n\r\n// Важно: отключаем кэширование\r\nexport const dynamic = \"force-dynamic\";\r\n\r\nexport async function GET(req: NextRequest) {\r\n  // Socket.IO инициализируется при первом подключении\r\n  // Здесь просто возвращаем ответ, чтобы маршрут существовал\r\n  return new Response(\"Socket.IO endpoint is ready\", { \r\n    status: 200 \r\n  });\r\n}"],"names":["dynamic","GET","req","Response","status"],"mappings":";;;;;;AAIO,MAAMA,UAAU;AAEhB,eAAeC,IAAIC,GAAgB;IACxC,oDAAoD;IACpD,2DAA2D;IAC3D,OAAO,IAAIC,SAAS,+BAA+B;QACjDC,QAAQ;IACV;AACF"}}]
+}
